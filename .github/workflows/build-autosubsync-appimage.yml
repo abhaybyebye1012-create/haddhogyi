@@ -42,10 +42,7 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Find the binary regardless of exact name (alass or alass-cli)
           ALASS_BIN=$(find target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -executable | head -n 1)
-          
-          # Find resources folder using a relative search from the workspace root
           RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
           
           mkdir -p "$RES_DIR/alass-bin"
@@ -56,7 +53,7 @@ jobs:
         run: |
           RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
-          export DEST_PATH="$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$(pwd)/$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
@@ -67,21 +64,32 @@ jobs:
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-          chmod +x "$RES_DIR/ffmpeg-bin/"*
+          chmod +x "$DEST_PATH/"*
 
       - name: Run PyInstaller
         run: |
-          MAIN_PY=$(find . -name "main.py" | head -n 1)
-          APP_DIR=$(dirname "$MAIN_PY")
-          cd "$APP_DIR"
+          # Find the absolute path to main.py
+          MAIN_PY_PATH=$(find $(pwd) -name "main.py" | head -n 1)
+          APP_SRC_DIR=$(dirname "$MAIN_PY_PATH")
           
-          pyinstaller --noconfirm --onedir --windowed \
-          --add-data "resources:resources" \
-          main.py --name AutoSubSync
+          echo "Found main.py at: $MAIN_PY_PATH"
+          echo "Source directory is: $APP_SRC_DIR"
+          
+          cd "$APP_SRC_DIR"
+          
+          # Verify resources folder exists in this specific directory
+          if [ -d "resources" ]; then
+            pyinstaller --noconfirm --onedir --windowed \
+            --add-data "resources:resources" \
+            "$MAIN_PY_PATH" --name AutoSubSync
+          else
+            echo "ERROR: resources folder not found in $APP_SRC_DIR"
+            ls -R
+            exit 1
+          fi
 
       - name: Create AppDir
         run: |
-          # Use find starting from the current directory
           DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
