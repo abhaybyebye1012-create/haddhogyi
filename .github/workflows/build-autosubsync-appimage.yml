@@ -89,25 +89,26 @@ jobs:
           import os
           import sys
           
-          # Force download/extraction
+          # This ensures the download/extraction happens
           static_ffmpeg.add_paths()
           
-          # Manually locate the binaries within the site-packages folder
-          # static-ffmpeg usually puts them in its own 'bin' subdirectory
-          import static_ffmpeg.config as config
-          bin_dir = config.BASE_BIN_PATH
+          # Path taken directly from your error log
+          bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin"
           
           ffmpeg_src = os.path.join(bin_dir, "ffmpeg")
           ffprobe_src = os.path.join(bin_dir, "ffprobe")
           
           dest = "/build/src/main/resources/ffmpeg-bin"
           
+          print(f"Checking for binaries in: {bin_dir}")
+          
           if os.path.exists(ffmpeg_src):
               shutil.copy2(ffmpeg_src, os.path.join(dest, "ffmpeg"))
               shutil.copy2(ffprobe_src, os.path.join(dest, "ffprobe"))
-              print(f"Successfully copied binaries from {bin_dir}")
+              print("Successfully copied ffmpeg and ffprobe.")
           else:
-              print(f"Error: Could not find binaries in {bin_dir}")
+              # Fallback: list files so we can see what happened if it fails
+              print(f"Files found in {bin_dir}: {os.listdir(bin_dir) if os.path.exists(bin_dir) else 'Folder not found'}")
               sys.exit(1)
           EOF
           
