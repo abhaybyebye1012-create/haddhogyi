@@ -42,15 +42,19 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Use find to locate the resources folder in your repo
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          # Find the binary regardless of exact name (alass or alass-cli)
+          ALASS_BIN=$(find target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -executable | head -n 1)
+          
+          # Find resources folder using a relative search from the workspace root
+          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
+          
           mkdir -p "$RES_DIR/alass-bin"
-          cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass"
+          cp "$ALASS_BIN" "$RES_DIR/alass-bin/alass"
           chmod +x "$RES_DIR/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
           export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
@@ -67,7 +71,7 @@ jobs:
 
       - name: Run PyInstaller
         run: |
-          MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
+          MAIN_PY=$(find . -name "main.py" | head -n 1)
           APP_DIR=$(dirname "$MAIN_PY")
           cd "$APP_DIR"
           
@@ -77,7 +81,8 @@ jobs:
 
       - name: Create AppDir
         run: |
-          DIST_DIR=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          # Use find starting from the current directory
+          DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
           
