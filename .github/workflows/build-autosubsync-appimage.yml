@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  AutoSubSync AppImage builder — "No-Compile" Edition
+#  AutoSubSync AppImage builder — "Binary Path Fix" Edition
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Build AutoSubSync AppImage
@@ -35,19 +35,14 @@ jobs:
       - name: Install Python Environment (Binary Only)
         run: |
           python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
-          
-          # Force BINARY installation to skip the "metadata generation" (compiling) step
           pip install --root-user-action=ignore --only-binary=:all: \
             PyQt6==6.4.2 PyQt6-Qt6==6.4.2 PyQt6-sip
-            
-          # Install other tools normally
           pip install --root-user-action=ignore pyinstaller static-ffmpeg
 
       - name: Clone and Install Source
         run: |
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
           cd /build/src
-          # Install project without triggering a PyQt6 re-install
           pip install --root-user-action=ignore . --no-deps
           pip install --root-user-action=ignore ffsubsync autosubsync rich requests psutil platformdirs chardet charset-normalizer
 
@@ -57,10 +52,14 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           rustup target add x86_64-unknown-linux-musl
           git clone --depth 1 https://github.com/kaegi/alass.git /build/alass-src
-          cd /build/alass-src/alass-cli
+          cd /build/alass-src
+          # Build from the root of the alass repo
           cargo build --release --target x86_64-unknown-linux-musl
+          
           mkdir -p /build/src/main/resources/alass-bin
-          cp target/x86_64-unknown-linux-musl/release/alass-cli /build/src/main/resources/alass-bin/alass
+          # The binary is named 'alass', and it's located in the target/target/release folder
+          cp target/x86_64-unknown-linux-musl/release/alass /build/src/main/resources/alass-bin/alass
+          chmod +x /build/src/main/resources/alass-bin/alass
 
       - name: Prepare ffmpeg
         run: |
@@ -81,7 +80,7 @@ jobs:
           
           pyinstaller build.spec --noconfirm
 
-      - name: Create AppImage
+      - name: Create AppDir
         run: |
           DIST_DIR=$(find /build/src/dist -maxdepth 1 -type d ! -path /build/src/dist | head -1)
           mkdir -p /build/AppDir
@@ -89,7 +88,9 @@ jobs:
           
           echo -e '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"\nexport PATH="$HERE/_internal/resources/ffmpeg-bin:$HERE/_internal/resources/alass-bin:$PATH"\nexport LD_LIBRARY_PATH="$HERE/_internal:$HERE:$LD_LIBRARY_PATH"\nexec "$HERE/AutoSubSync" "$@"' > /build/AppDir/AppRun
           chmod +x /build/AppDir/AppRun
-          
+
+      - name: Package AppImage
+        run: |
           cd /build
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
