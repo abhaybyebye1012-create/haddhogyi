@@ -129,7 +129,7 @@ jobs:
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
-          # 1. Create the desktop file correctly using a heredoc
+          # Write the desktop file without using 'echo' flags
           cat > /build/AppDir/autosubsync.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
@@ -139,31 +139,35 @@ Icon=autosubsync
 Categories=Utility;
 EOF
 
-          # 2. Provide the placeholder icon
+          # Provide the placeholder icon
           touch /build/AppDir/autosubsync.png
 
-          # 3. Direct Launch Fix: Link the binary as AppRun
-          # This avoids the "exec format error" caused by shell scripts
+          # Direct Launch Fix: Link the binary as AppRun
+          # This is the most stable way to avoid "exec format" errors
           rm -f /build/AppDir/AppRun
           ln -s AutoSubSync /build/AppDir/AppRun
+
+      - name: Fix Resource Paths
+        run: |
+          # Move FFmpeg and Alass into the AppDir so the app can find them
+          # We place them in a folder named 'resources' inside the AppDir root
+          mkdir -p /build/AppDir/resources
+          if [ -d "/build/src/main/resources" ]; then
+            cp -r /build/src/main/resources/* /build/AppDir/resources/
+          fi
 
       - name: Package AppImage
         run: |
           cd /build
-          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
-          # We point to the desktop file explicitly if needed, 
-          # but having it in the root of AppDir is usually enough.
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool /build/AppDir /build/AutoSubSync-linux-amd64.AppImage
-- name: Fix Resource Paths
-        run: |
-          # Ensure the binary can find ffmpeg and alass in its local resources folder
-          mkdir -p /build/AppDir/resources
-          cp -r /build/src/main/resources/* /build/AppDir/resources/
+          # Extract and run to avoid FUSE errors in the runner
+          ./appimagetool --appimage-extract
+          ARCH=x86_64 ./squashfs-root/AppRun /build/AppDir /build/AutoSubSync-x86_64.AppImage
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: AutoSubSync-Linux
-          path: /build/AutoSubSync-linux-amd64.AppImage
+          path: /build/AutoSubSync-x86_64.AppImage
