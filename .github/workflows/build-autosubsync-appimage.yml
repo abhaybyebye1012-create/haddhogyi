@@ -83,25 +83,35 @@ jobs:
       - name: Prepare ffmpeg
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
-          # We use a Python script to extract the paths and copy the files in one go
           python3 << 'EOF'
           import static_ffmpeg
           import shutil
           import os
+          import sys
           
-          # This triggers the download/location of the binaries
-          ffmpeg_path, ffprobe_path = static_ffmpeg.add_paths()
-          print(f"Found ffmpeg at: {ffmpeg_path}")
-          print(f"Found ffprobe at: {ffprobe_path}")
+          # Force download/extraction
+          static_ffmpeg.add_paths()
+          
+          # Manually locate the binaries within the site-packages folder
+          # static-ffmpeg usually puts them in its own 'bin' subdirectory
+          import static_ffmpeg.config as config
+          bin_dir = config.BASE_BIN_PATH
+          
+          ffmpeg_src = os.path.join(bin_dir, "ffmpeg")
+          ffprobe_src = os.path.join(bin_dir, "ffprobe")
           
           dest = "/build/src/main/resources/ffmpeg-bin"
-          shutil.copy2(ffmpeg_path, os.path.join(dest, "ffmpeg"))
-          shutil.copy2(ffprobe_path, os.path.join(dest, "ffprobe"))
+          
+          if os.path.exists(ffmpeg_src):
+              shutil.copy2(ffmpeg_src, os.path.join(dest, "ffmpeg"))
+              shutil.copy2(ffprobe_src, os.path.join(dest, "ffprobe"))
+              print(f"Successfully copied binaries from {bin_dir}")
+          else:
+              print(f"Error: Could not find binaries in {bin_dir}")
+              sys.exit(1)
           EOF
           
           chmod +x /build/src/main/resources/ffmpeg-bin/*
-          echo "FFmpeg binaries bundled successfully."
-
       - name: Run PyInstaller
         run: |
           cd /build/src
