@@ -32,19 +32,18 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Force create the directory to avoid pathing errors
-          TARGET_DIR="/github/workspace/src/main/resources/alass-bin"
-          mkdir -p "$TARGET_DIR"
-          cp target/x86_64-unknown-linux-musl/release/alass "$TARGET_DIR/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$TARGET_DIR/alass"
-          chmod +x "$TARGET_DIR/alass"
+          # Find resources folder relative to wherever checkout happened
+          RES_DIR=$(find $GITHUB_WORKSPACE -type d -name "resources" | head -n 1)
+          mkdir -p "$RES_DIR/alass-bin"
+          cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
+          chmod +x "$RES_DIR/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          # Force create the directory
-          TARGET_DIR="/github/workspace/src/main/resources/ffmpeg-bin"
-          mkdir -p "$TARGET_DIR"
-          export DEST_PATH="$TARGET_DIR"
+          RES_DIR=$(find $GITHUB_WORKSPACE -type d -name "resources" | head -n 1)
+          mkdir -p "$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
@@ -53,29 +52,37 @@ jobs:
           for f in ["ffmpeg", "ffprobe"]:
               src = os.path.join(bin_dir, f)
               if os.path.exists(src):
-                  # Ensure destination exists before copying
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-          chmod +x "$TARGET_DIR/"*
+          chmod +x "$RES_DIR/ffmpeg-bin/"*
 
       - name: Run PyInstaller
         run: |
-          # Install dependencies
+          # 1. Find the exact file path for main.py
+          MAIN_FILE=$(find $GITHUB_WORKSPACE -name "main.py" | head -n 1)
+          # 2. Get the directory and filename
+          MAIN_DIR=$(dirname "$MAIN_FILE")
+          MAIN_NAME=$(basename "$MAIN_FILE")
+          
+          cd "$MAIN_DIR"
           pip install --no-cache-dir pyinstaller
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
           
-          # Use the absolute container path for the source
-          cd /github/workspace/src
-          
+          # Install requirements from the repo root if they exist
+          REQ=$(find $GITHUB_WORKSPACE -name "requirements.txt" | head -n 1)
+          if [ -n "$REQ" ]; then pip install -r "$REQ"; fi
+
+          # 3. Run PyInstaller from inside the folder where main.py sits
+          # This handles both the script location and the local 'resources' folder
           pyinstaller --noconfirm --onedir --windowed \
-          --add-data "main/resources:resources" \
-          main/main.py --name AutoSubSync
+          --add-data "resources:resources" \
+          "$MAIN_NAME" --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Copy from the known dist location
+          # Find the dist folder PyInstaller just created
+          DIST_DIR=$(find $GITHUB_WORKSPACE -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
-          cp -a /github/workspace/src/dist/AutoSubSync/. /tmp/AppDir/
+          cp -a "$DIST_DIR/." /tmp/AppDir/
           
           printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
           touch /tmp/AppDir/autosubsync.png
