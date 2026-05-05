@@ -1,50 +1,31 @@
-# ─────────────────────────────────────────────────────────────────────────────
-#  AutoSubSync AppImage builder — "Binary Path Fix" Edition
-# ─────────────────────────────────────────────────────────────────────────────
-
 name: Build AutoSubSync AppImage
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build for glibc 2.28+ Compatibility
     runs-on: ubuntu-latest
-    container:
-      image: python:3.10-slim-bullseye
+    container: python:3.10-slim-bullseye
 
     steps:
-      - name: Install system dependencies
+      - name: Install System Dependencies
         run: |
-          apt-get update -q
-          apt-get install -y --no-install-recommends \
-            wget curl git ca-certificates xz-utils file \
-            binutils patchelf gcc g++ make musl-tools \
-            python3-dev libdbus-1-dev pkg-config \
-            libglib2.0-0 libx11-6 libxcb1 libxcb-util1 libxcb-icccm4 \
-            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 \
-            libxext6 libxrender1 libxkbcommon0 libxkbcommon-x11-0 \
-            libfontconfig1 libfreetype6 libdbus-1-3 \
-            libgl1-mesa-glx libgles2-mesa libglx0 \
-            libxi6 libxcursor1 libxcomposite1 libxtst6 \
-            libasound2 libnss3 libpulse0 \
-            squashfs-tools upx-ucl zip unzip
-
-      - name: Install Python Environment (Binary Only)
-        run: |
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
-          pip install --root-user-action=ignore --only-binary=:all: \
-            PyQt6==6.4.2 PyQt6-Qt6==6.4.2 PyQt6-sip
-          pip install --root-user-action=ignore pyinstaller static-ffmpeg
+          apt-get update
+          apt-get install -y git wget curl build-essential libgl1-mesa-dev libxkbcommon-x11-0 \
+          libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools
 
       - name: Clone and Install Source
         run: |
-          git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
-          cd /build/src
-          pip install --root-user-action=ignore . --no-deps
-          pip install --root-user-action=ignore ffsubsync autosubsync rich requests psutil platformdirs chardet charset-normalizer
+          git clone https://github.com/v8952/AutoSubSync.git /build
+          cd /build
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir pyinstaller static-ffmpeg
 
       - name: Build static alass
         run: |
@@ -53,75 +34,43 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
           git clone --depth 1 https://github.com/kaegi/alass.git /build/alass-src
           cd /build/alass-src
-          
-          # Build the whole workspace
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # --- THE WIDE NET SEARCH ---
           mkdir -p /build/src/main/resources/alass-bin
-          
-          # We search for any executable file starting with 'alass' inside the target directory
-          # This catches 'alass', 'alass-cli', or 'alass-bin'
-          FOUND_BIN=$(find target/x86_64-unknown-linux-musl/release -maxdepth 2 -type f -executable -name "alass*" | head -n 1)
-          
-          if [ -z "$FOUND_BIN" ]; then
-             echo "Trying fallback search..."
-             FOUND_BIN=$(find target/release -maxdepth 2 -type f -executable -name "alass*" | head -n 1)
-          fi
-
+          # Wide Net Search for the binary
+          FOUND_BIN=$(find target/ -type f -executable -name "alass*" | head -n 1)
           if [ -n "$FOUND_BIN" ]; then
-            echo "Success! Found binary at: $FOUND_BIN"
             cp "$FOUND_BIN" /build/src/main/resources/alass-bin/alass
             chmod +x /build/src/main/resources/alass-bin/alass
           else
-            echo "CRITICAL ERROR: The Rust compiler finished but the binary is invisible."
-            echo "Contents of release folder for debugging:"
-            ls -R target/
-            exit 1
+            echo "ERROR: alass binary not found" && exit 1
           fi
 
       - name: Prepare ffmpeg
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
           python3 << 'EOF'
-          import static_ffmpeg
-          import shutil
-          import os
-          import sys
-          
-          # Ensure download/extraction happens
+          import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
-          
-          # Path corrected based on your last log: 'bin' contains a 'linux' folder
+          # Absolute path based on previous logs
           bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
-          
-          ffmpeg_src = os.path.join(bin_dir, "ffmpeg")
-          ffprobe_src = os.path.join(bin_dir, "ffprobe")
-          
           dest = "/build/src/main/resources/ffmpeg-bin"
-          
-          print(f"Checking for binaries in: {bin_dir}")
-          
-          if os.path.exists(ffmpeg_src):
-              shutil.copy2(ffmpeg_src, os.path.join(dest, "ffmpeg"))
-              shutil.copy2(ffprobe_src, os.path.join(dest, "ffprobe"))
-              print("Successfully copied ffmpeg and ffprobe from the linux subfolder.")
+          if os.path.exists(os.path.join(bin_dir, "ffmpeg")):
+              shutil.copy2(os.path.join(bin_dir, "ffmpeg"), os.path.join(dest, "ffmpeg"))
+              shutil.copy2(os.path.join(bin_dir, "ffprobe"), os.path.join(dest, "ffprobe"))
           else:
-              # Final safety check: if 'linux' isn't there, list what IS there
-              parent = os.path.dirname(bin_dir)
-              print(f"Contents of {parent}: {os.listdir(parent) if os.path.exists(parent) else 'Not found'}")
+              print("FFmpeg not found in expected path")
               sys.exit(1)
           EOF
-          
           chmod +x /build/src/main/resources/ffmpeg-bin/*
+
       - name: Run PyInstaller
         run: |
           cd /build/src
-          mkdir -p main/resources/autosubsync
-          echo -e "#!/usr/bin/env python3\nfrom autosubsync.main import main\nif __name__=='__main__': import sys; sys.exit(main())" > main/resources/autosubsync/autosubsync
-          chmod +x main/resources/autosubsync/autosubsync
-          
-          pyinstaller build.spec --noconfirm
+          # Bundle the resources folder directly into the build
+          pyinstaller --noconfirm --onedir --windowed \
+          --add-data "main/resources:resources" \
+          main/main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
@@ -129,38 +78,30 @@ jobs:
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
-          # Write the desktop file without using 'echo' flags
+          # Clean Desktop File
           cat > /build/AppDir/autosubsync.desktop << 'EOF'
-
-
-          # Provide the placeholder icon
+[Desktop Entry]
+Type=Application
+Name=AutoSubSync
+Exec=AutoSubSync
+Icon=autosubsync
+Categories=Utility;
+EOF
           touch /build/AppDir/autosubsync.png
 
-          # Direct Launch Fix: Link the binary as AppRun
-          # This is the most stable way to avoid "exec format" errors
+          # Direct Launch Fix (Symbolic Link)
           rm -f /build/AppDir/AppRun
           ln -s AutoSubSync /build/AppDir/AppRun
-
-      - name: Fix Resource Paths
-        run: |
-          # Move FFmpeg and Alass into the AppDir so the app can find them
-          # We place them in a folder named 'resources' inside the AppDir root
-          mkdir -p /build/AppDir/resources
-          if [ -d "/build/src/main/resources" ]; then
-            cp -r /build/src/main/resources/* /build/AppDir/resources/
-          fi
 
       - name: Package AppImage
         run: |
           cd /build
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          
-          # Extract and run to avoid FUSE errors in the runner
           ./appimagetool --appimage-extract
           ARCH=x86_64 ./squashfs-root/AppRun /build/AppDir /build/AutoSubSync-x86_64.AppImage
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AutoSubSync-Linux
