@@ -32,10 +32,9 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Go back to root and ensure resources folder exists
           cd $GITHUB_WORKSPACE
           mkdir -p src/main/resources/alass-bin
-          cp /tmp/alass-src/target/x86_64-unknown-linux-musl/release/alass* src/main/resources/alass-bin/alass || true
+          cp /tmp/alass-src/target/x86_64-unknown-linux-musl/release/alass src/main/resources/alass-bin/alass || true
           chmod +x src/main/resources/alass-bin/alass
 
       - name: Prepare ffmpeg
@@ -44,43 +43,62 @@ jobs:
           mkdir -p src/main/resources/ffmpeg-bin
           export DEST_PATH="$GITHUB_WORKSPACE/src/main/resources/ffmpeg-bin"
           python3 << 'EOF'
-          import static_ffmpeg, shutil, os
-          static_ffmpeg.add_paths()
-          bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
-          dest = os.getenv("DEST_PATH")
-          for f in ["ffmpeg", "ffprobe"]:
-              src = os.path.join(bin_dir, f)
-              if os.path.exists(src):
-                  shutil.copy2(src, os.path.join(dest, f))
-          EOF
+import static_ffmpeg, shutil, os
+static_ffmpeg.add_paths()
+# Note: Path may vary slightly based on environment; standardizing search
+bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
+dest = os.getenv("DEST_PATH")
+for f in ["ffmpeg", "ffprobe"]:
+    src = os.path.join(bin_dir, f)
+    if os.path.exists(src):
+        shutil.copy2(src, os.path.join(dest, f))
+EOF
           chmod +x "$DEST_PATH/"*
 
       - name: Run PyInstaller
         run: |
           pip install --no-cache-dir pyinstaller
-          
-          # Move to the source directory
           cd src/main
-          
-          # Install requirements if they exist
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-          # Explicitly run on the file that is definitely there
+          # Build as onedir
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
-          main.py --name AutoSubSync
+          --name AutoSubSync \
+          main.py
 
       - name: Create AppDir
         run: |
+          rm -rf /tmp/AppDir
           mkdir -p /tmp/AppDir
-          # Copy from the explicit build location
+          
+          # Copy the contents of the PyInstaller dist folder to AppDir root
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
-          printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
+          # Create Desktop Entry
+          cat <<EOF > /tmp/AppDir/autosubsync.desktop
+[Desktop Entry]
+Type=Application
+Name=AutoSubSync
+Exec=AutoSubSync
+Icon=autosubsync
+Categories=Utility;
+Terminal=false
+EOF
+          
+          # Create a dummy icon (required by appimagetool)
+          # In a real scenario, replace this with your actual .png icon
           touch /tmp/AppDir/autosubsync.png
           
-          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexec "${HERE}/AutoSubSync" "$@"\n' > /tmp/AppDir/AppRun
+          # Create the entry point script
+          cat <<'EOF' > /tmp/AppDir/AppRun
+#!/bin/sh
+# Get the directory where AppRun is located
+HERE="$(dirname "$(readlink -f "${0}")")"
+# Execute the main PyInstaller binary
+exec "${HERE}/AutoSubSync" "$@"
+EOF
           chmod +x /tmp/AppDir/AppRun
 
       - name: Package AppImage
@@ -88,8 +106,12 @@ jobs:
           cd /tmp
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          export ARCH=x86_64
+          
+          # Extract appimagetool because FUSE doesn't work in Docker/Actions
           ./appimagetool --appimage-extract
+          
+          # Build the AppImage
+          export ARCH=x86_64
           ./squashfs-root/AppRun /tmp/AppDir /tmp/AutoSubSync-x86_64.AppImage
 
       - name: Upload Artifact
