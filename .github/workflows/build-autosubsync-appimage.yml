@@ -54,28 +54,31 @@ jobs:
           git clone --depth 1 https://github.com/kaegi/alass.git /build/alass-src
           cd /build/alass-src
           
-          # Build the project
+          # Build the whole workspace
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # --- SEARCH AND RESCUE ---
-          # We find any file named 'alass' in the target directory that is an executable
+          # --- THE WIDE NET SEARCH ---
           mkdir -p /build/src/main/resources/alass-bin
-          ALASS_PATH=$(find target/ -name alass -type f -executable | head -n 1)
           
-          if [ -z "$ALASS_PATH" ]; then
-            echo "Binary not found in target/, checking root..."
-            ALASS_PATH=$(find . -name alass -type f -executable | head -n 1)
+          # We search for any executable file starting with 'alass' inside the target directory
+          # This catches 'alass', 'alass-cli', or 'alass-bin'
+          FOUND_BIN=$(find target/x86_64-unknown-linux-musl/release -maxdepth 2 -type f -executable -name "alass*" | head -n 1)
+          
+          if [ -z "$FOUND_BIN" ]; then
+             echo "Trying fallback search..."
+             FOUND_BIN=$(find target/release -maxdepth 2 -type f -executable -name "alass*" | head -n 1)
           fi
-          
-          if [ -n "$ALASS_PATH" ]; then
-            echo "Found alass at: $ALASS_PATH"
-            cp "$ALASS_PATH" /build/src/main/resources/alass-bin/alass
+
+          if [ -n "$FOUND_BIN" ]; then
+            echo "Success! Found binary at: $FOUND_BIN"
+            cp "$FOUND_BIN" /build/src/main/resources/alass-bin/alass
+            chmod +x /build/src/main/resources/alass-bin/alass
           else
-            echo "ERROR: Could not find alass binary anywhere!"
+            echo "CRITICAL ERROR: The Rust compiler finished but the binary is invisible."
+            echo "Contents of release folder for debugging:"
+            ls -R target/
             exit 1
           fi
-          
-          chmod +x /build/src/main/resources/alass-bin/alass
 
       - name: Prepare ffmpeg
         run: |
