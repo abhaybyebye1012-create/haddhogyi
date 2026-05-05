@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  AutoSubSync AppImage builder — Compatibility Focus
+#  AutoSubSync AppImage builder — "No-Compile" Edition
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Build AutoSubSync AppImage
@@ -11,7 +11,6 @@ jobs:
   build:
     name: Build for glibc 2.28+ Compatibility
     runs-on: ubuntu-latest
-    # Moving to Bullseye (Debian 11) for better tool support while keeping glibc low
     container:
       image: python:3.10-slim-bullseye
 
@@ -33,18 +32,23 @@ jobs:
             libasound2 libnss3 libpulse0 \
             squashfs-tools upx-ucl zip unzip
 
-      - name: Install Python Environment
+      - name: Install Python Environment (Binary Only)
         run: |
           python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
-          # On Bullseye, these should install normally without "Not Found" errors
-          pip install --root-user-action=ignore pyinstaller PyQt6 PyQt6-Qt6 PyQt6-sip static-ffmpeg
+          
+          # Force BINARY installation to skip the "metadata generation" (compiling) step
+          pip install --root-user-action=ignore --only-binary=:all: \
+            PyQt6==6.4.2 PyQt6-Qt6==6.4.2 PyQt6-sip
+            
+          # Install other tools normally
+          pip install --root-user-action=ignore pyinstaller static-ffmpeg
 
       - name: Clone and Install Source
         run: |
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
           cd /build/src
-          # Install core requirements
-          pip install --root-user-action=ignore .
+          # Install project without triggering a PyQt6 re-install
+          pip install --root-user-action=ignore . --no-deps
           pip install --root-user-action=ignore ffsubsync autosubsync rich requests psutil platformdirs chardet charset-normalizer
 
       - name: Build static alass
@@ -71,7 +75,6 @@ jobs:
       - name: Run PyInstaller
         run: |
           cd /build/src
-          # Create internal runner
           mkdir -p main/resources/autosubsync
           echo -e "#!/usr/bin/env python3\nfrom autosubsync.main import main\nif __name__=='__main__': import sys; sys.exit(main())" > main/resources/autosubsync/autosubsync
           chmod +x main/resources/autosubsync/autosubsync
@@ -84,7 +87,6 @@ jobs:
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
-          # AppRun with standard search paths
           echo -e '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"\nexport PATH="$HERE/_internal/resources/ffmpeg-bin:$HERE/_internal/resources/alass-bin:$PATH"\nexport LD_LIBRARY_PATH="$HERE/_internal:$HERE:$LD_LIBRARY_PATH"\nexec "$HERE/AutoSubSync" "$@"' > /build/AppDir/AppRun
           chmod +x /build/AppDir/AppRun
           
