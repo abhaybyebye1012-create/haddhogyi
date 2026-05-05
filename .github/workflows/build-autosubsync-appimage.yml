@@ -129,6 +129,20 @@ jobs:
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
+          # 1. Create the REQUIRED .desktop file
+          cat > /build/AppDir/autosubsync.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=AutoSubSync
+          Exec=AutoSubSync
+          Icon=autosubsync
+          Categories=Utility;
+          EOF
+
+          # 2. Provide a placeholder icon (even a blank one works)
+          touch /build/AppDir/autosubsync.png
+
+          # 3. Create the AppRun script
           echo -e '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"\nexport PATH="$HERE/_internal/resources/ffmpeg-bin:$HERE/_internal/resources/alass-bin:$PATH"\nexport LD_LIBRARY_PATH="$HERE/_internal:$HERE:$LD_LIBRARY_PATH"\nexec "$HERE/AutoSubSync" "$@"' > /build/AppDir/AppRun
           chmod +x /build/AppDir/AppRun
 
@@ -137,6 +151,9 @@ jobs:
           cd /build
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
+          
+          # We point to the desktop file explicitly if needed, 
+          # but having it in the root of AppDir is usually enough.
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool /build/AppDir /build/AutoSubSync-linux-amd64.AppImage
 
       - name: Upload
