@@ -173,25 +173,35 @@ INTERNAL="$HERE/_internal"
 [ -d "$INTERNAL" ] || INTERNAL="$HERE"
 export PATH="$INTERNAL/resources/ffmpeg-bin:$INTERNAL/resources/alass-bin:$INTERNAL:$HERE:$PATH"
 export LD_LIBRARY_PATH="$INTERNAL:$HERE:${LD_LIBRARY_PATH:-}"
-for QT_PLUGINS in "$INTERNAL/PyQt6/Qt6/plugins" "$INTERNAL/PyQt6_Qt6/Qt6/plugins" "$INTERNAL/platforms/.." "$HERE/platforms.."; do
-  [ -d "$QT_PLUGINS/platforms" ] && export QT_PLUGIN_PATH="$QT_PLUGINS" && break
-done
 [ -d "$INTERNAL/platforms" ] && export QT_QPA_PLATFORM_PLUGIN_PATH="$INTERNAL/platforms"
 exec "$INTERNAL/AutoSubSync" "$@"
 APPRUN
           chmod +x /build/AppDir/AppRun
 
-      # ── 13. Download appimagetool and build AppImage ───────────────────
+      # ── 13. Build AppImage ─────────────────────────────────────────────
       - name: Build AppImage
         run: |
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /build/appimagetool
           chmod +x /build/appimagetool
-          /build/appimagetool /build/AppDir /build/AutoSubSync-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 /build/appimagetool /build/AppDir /build/AutoSubSync-x86_64.AppImage
           ls -lh /build/AutoSubSync-x86_64.AppImage
 
-      # ── 14. Upload AppImage as artifact ───────────────────────────────
-      - name: Upload AppImage
+      # ── 14. Optional: Sign AppImage ───────────────────────────────────
+      - name: Sign AppImage
+        if: secrets.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --yes --passphrase "$GPG_PASSPHRASE" \
+              --output /build/AutoSubSync-x86_64.AppImage.sig \
+              --detach-sign /build/AutoSubSync-x86_64.AppImage
+
+      # ── 15. Upload AppImage and signature ─────────────────────────────
+      - name: Upload AppImage and signature
         uses: actions/upload-artifact@v3
         with:
           name: AutoSubSync-x86_64.AppImage
-          path: /build/AutoSubSync-x86_64.AppImage
+          path: |
+            /build/AutoSubSync-x86_64.AppImage
+            /build/AutoSubSync-x86_64.AppImage.sig
