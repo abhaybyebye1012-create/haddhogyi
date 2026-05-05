@@ -32,8 +32,8 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Find the resources folder wherever it is
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | head -n 1)
+          # Find resources folder relative to workspace
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/alass-bin"
           cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
           chmod +x "$RES_DIR/alass-bin/alass"
@@ -41,7 +41,7 @@ jobs:
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | head -n 1)
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
           export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
@@ -58,27 +58,34 @@ jobs:
 
       - name: Run PyInstaller
         run: |
-          # Find main.py location
+          # Find absolute paths
           MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
-          APP_DIR=$(dirname "$MAIN_PY")
-          cd "$APP_DIR"
+          REQ_FILE=$(find ${{ github.workspace }} -name "requirements.txt" | head -n 1)
           
+          if [ -z "$MAIN_PY" ]; then
+            echo "ERROR: Could not find main.py"
+            ls -R ${{ github.workspace }}
+            exit 1
+          fi
+
           pip install --no-cache-dir pyinstaller
-          # Install requirements if they exist in this folder or parent
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
-          if [ -f "../requirements.txt" ]; then pip install -r ../requirements.txt; fi
+          if [ -n "$REQ_FILE" ]; then pip install -r "$REQ_FILE"; fi
+
+          # Get the folder containing main.py to handle relative resource mapping
+          SRC_ROOT=$(dirname "$MAIN_PY")
+          cd "$SRC_ROOT"
           
-          # Build from the directory where main.py lives
+          # Run pyinstaller using the absolute path but from the local directory
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
-          main.py --name AutoSubSync
+          "$MAIN_PY" --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Find the dist/AutoSubSync folder that PyInstaller just created
-          DIST_PATH=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          # Find the dist output
+          DIST_DIR=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
-          cp -a "$DIST_PATH/." /tmp/AppDir/
+          cp -a "$DIST_DIR/." /tmp/AppDir/
           
           printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
           touch /tmp/AppDir/autosubsync.png
