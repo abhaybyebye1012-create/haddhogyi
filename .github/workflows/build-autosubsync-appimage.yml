@@ -89,11 +89,11 @@ jobs:
           import os
           import sys
           
-          # This ensures the download/extraction happens
+          # Ensure download/extraction happens
           static_ffmpeg.add_paths()
           
-          # Path taken directly from your error log
-          bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin"
+          # Path corrected based on your last log: 'bin' contains a 'linux' folder
+          bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
           
           ffmpeg_src = os.path.join(bin_dir, "ffmpeg")
           ffprobe_src = os.path.join(bin_dir, "ffprobe")
@@ -105,10 +105,11 @@ jobs:
           if os.path.exists(ffmpeg_src):
               shutil.copy2(ffmpeg_src, os.path.join(dest, "ffmpeg"))
               shutil.copy2(ffprobe_src, os.path.join(dest, "ffprobe"))
-              print("Successfully copied ffmpeg and ffprobe.")
+              print("Successfully copied ffmpeg and ffprobe from the linux subfolder.")
           else:
-              # Fallback: list files so we can see what happened if it fails
-              print(f"Files found in {bin_dir}: {os.listdir(bin_dir) if os.path.exists(bin_dir) else 'Folder not found'}")
+              # Final safety check: if 'linux' isn't there, list what IS there
+              parent = os.path.dirname(bin_dir)
+              print(f"Contents of {parent}: {os.listdir(parent) if os.path.exists(parent) else 'Not found'}")
               sys.exit(1)
           EOF
           
