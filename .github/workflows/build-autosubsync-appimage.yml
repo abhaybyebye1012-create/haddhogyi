@@ -18,7 +18,8 @@ jobs:
           apt-get update
           apt-get install -y git wget curl build-essential libgl1-mesa-dev libxkbcommon-x11-0 \
           libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools
+          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools \
+          pkg-config libssl-dev
 
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -28,14 +29,23 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
           export PATH="$HOME/.cargo/bin:$PATH"
           rustup target add x86_64-unknown-linux-musl
+          
           git clone --depth 1 https://github.com/kaegi/alass.git /tmp/alass-src
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
           cd $GITHUB_WORKSPACE
           mkdir -p src/main/resources/alass-bin
-          cp /tmp/alass-src/target/x86_64-unknown-linux-musl/release/alass src/main/resources/alass-bin/alass || true
-          chmod +x src/main/resources/alass-bin/alass
+          
+          # Find the actual binary and copy it specifically to 'alass'
+          ALASS_BIN=$(find /tmp/alass-src/target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -name "alass*" | head -n 1)
+          if [ -f "$ALASS_BIN" ]; then
+            cp "$ALASS_BIN" src/main/resources/alass-bin/alass
+            chmod +x src/main/resources/alass-bin/alass
+          else
+            echo "Alass binary not found after build"
+            exit 1
+          fi
 
       - name: Prepare ffmpeg
         run: |
@@ -45,13 +55,16 @@ jobs:
           python3 << 'EOF'
 import static_ffmpeg, shutil, os
 static_ffmpeg.add_paths()
-# Note: Path may vary slightly based on environment; standardizing search
-bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
+# Searching for the bin directory dynamically
+import static_ffmpeg.run as sfr
+bin_dir = os.path.join(os.path.dirname(sfr.__file__), "bin", "linux")
 dest = os.getenv("DEST_PATH")
 for f in ["ffmpeg", "ffprobe"]:
     src = os.path.join(bin_dir, f)
     if os.path.exists(src):
         shutil.copy2(src, os.path.join(dest, f))
+    else:
+        print(f"Warning: {f} not found at {src}")
 EOF
           chmod +x "$DEST_PATH/"*
 
@@ -62,7 +75,6 @@ EOF
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-          # Build as onedir
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           --name AutoSubSync \
@@ -73,7 +85,7 @@ EOF
           rm -rf /tmp/AppDir
           mkdir -p /tmp/AppDir
           
-          # Copy the contents of the PyInstaller dist folder to AppDir root
+          # Copy PyInstaller distribution
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
           # Create Desktop Entry
@@ -87,16 +99,14 @@ Categories=Utility;
 Terminal=false
 EOF
           
-          # Create a dummy icon (required by appimagetool)
-          # In a real scenario, replace this with your actual .png icon
+          # Create placeholder icon
           touch /tmp/AppDir/autosubsync.png
           
-          # Create the entry point script
+          # Create AppRun entry point
           cat <<'EOF' > /tmp/AppDir/AppRun
 #!/bin/sh
-# Get the directory where AppRun is located
 HERE="$(dirname "$(readlink -f "${0}")")"
-# Execute the main PyInstaller binary
+export PATH="${HERE}:${PATH}"
 exec "${HERE}/AutoSubSync" "$@"
 EOF
           chmod +x /tmp/AppDir/AppRun
@@ -107,10 +117,9 @@ EOF
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
-          # Extract appimagetool because FUSE doesn't work in Docker/Actions
+          # Extract because GitHub runners lack FUSE support
           ./appimagetool --appimage-extract
           
-          # Build the AppImage
           export ARCH=x86_64
           ./squashfs-root/AppRun /tmp/AppDir /tmp/AutoSubSync-x86_64.AppImage
 
