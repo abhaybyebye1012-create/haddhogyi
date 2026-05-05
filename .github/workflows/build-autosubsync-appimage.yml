@@ -131,13 +131,7 @@ jobs:
           
           # Write the desktop file without using 'echo' flags
           cat > /build/AppDir/autosubsync.desktop << 'EOF'
-[Desktop Entry]
-Type=Application
-Name=AutoSubSync
-Exec=AutoSubSync
-Icon=autosubsync
-Categories=Utility;
-EOF
+
 
           # Provide the placeholder icon
           touch /build/AppDir/autosubsync.png
