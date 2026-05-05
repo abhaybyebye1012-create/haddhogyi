@@ -32,8 +32,8 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Find resources folder relative to workspace
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          # Use relative find inside the container
+          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/alass-bin"
           cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
           chmod +x "$RES_DIR/alass-bin/alass"
@@ -41,9 +41,9 @@ jobs:
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
-          export DEST_PATH="$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$(pwd)/${RES_DIR#./}/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
@@ -54,36 +54,34 @@ jobs:
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-          chmod +x "$RES_DIR/ffmpeg-bin/"*
+          chmod +x "$DEST_PATH/"*
 
       - name: Run PyInstaller
         run: |
-          # Find absolute paths
-          MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
-          REQ_FILE=$(find ${{ github.workspace }} -name "requirements.txt" | head -n 1)
+          # Use relative find to stay within the container's mount
+          MAIN_PY=$(find . -name "main.py" | head -n 1)
+          REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
           
           if [ -z "$MAIN_PY" ]; then
             echo "ERROR: Could not find main.py"
-            ls -R ${{ github.workspace }}
+            ls -R
             exit 1
           fi
 
           pip install --no-cache-dir pyinstaller
           if [ -n "$REQ_FILE" ]; then pip install -r "$REQ_FILE"; fi
 
-          # Get the folder containing main.py to handle relative resource mapping
           SRC_ROOT=$(dirname "$MAIN_PY")
           cd "$SRC_ROOT"
           
-          # Run pyinstaller using the absolute path but from the local directory
+          # Use the filename now that we are in the correct folder
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
-          "$MAIN_PY" --name AutoSubSync
+          "$(basename "$MAIN_PY")" --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Find the dist output
-          DIST_DIR=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR/." /tmp/AppDir/
           
