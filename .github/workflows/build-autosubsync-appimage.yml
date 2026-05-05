@@ -32,18 +32,19 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Use relative find inside the container
-          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
-          mkdir -p "$RES_DIR/alass-bin"
-          cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
-          chmod +x "$RES_DIR/alass-bin/alass"
+          # Force create the directory to avoid pathing errors
+          TARGET_DIR="/github/workspace/src/main/resources/alass-bin"
+          mkdir -p "$TARGET_DIR"
+          cp target/x86_64-unknown-linux-musl/release/alass "$TARGET_DIR/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$TARGET_DIR/alass"
+          chmod +x "$TARGET_DIR/alass"
 
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          RES_DIR=$(find . -type d -name "resources" | grep "main/resources" | head -n 1)
-          mkdir -p "$RES_DIR/ffmpeg-bin"
-          export DEST_PATH="$(pwd)/${RES_DIR#./}/ffmpeg-bin"
+          # Force create the directory
+          TARGET_DIR="/github/workspace/src/main/resources/ffmpeg-bin"
+          mkdir -p "$TARGET_DIR"
+          export DEST_PATH="$TARGET_DIR"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
@@ -52,38 +53,29 @@ jobs:
           for f in ["ffmpeg", "ffprobe"]:
               src = os.path.join(bin_dir, f)
               if os.path.exists(src):
+                  # Ensure destination exists before copying
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-          chmod +x "$DEST_PATH/"*
+          chmod +x "$TARGET_DIR/"*
 
       - name: Run PyInstaller
         run: |
-          # Use relative find to stay within the container's mount
-          MAIN_PY=$(find . -name "main.py" | head -n 1)
-          REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
-          
-          if [ -z "$MAIN_PY" ]; then
-            echo "ERROR: Could not find main.py"
-            ls -R
-            exit 1
-          fi
-
+          # Install dependencies
           pip install --no-cache-dir pyinstaller
-          if [ -n "$REQ_FILE" ]; then pip install -r "$REQ_FILE"; fi
-
-          SRC_ROOT=$(dirname "$MAIN_PY")
-          cd "$SRC_ROOT"
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
           
-          # Use the filename now that we are in the correct folder
+          # Use the absolute container path for the source
+          cd /github/workspace/src
+          
           pyinstaller --noconfirm --onedir --windowed \
-          --add-data "resources:resources" \
-          "$(basename "$MAIN_PY")" --name AutoSubSync
+          --add-data "main/resources:resources" \
+          main/main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          # Copy from the known dist location
           mkdir -p /tmp/AppDir
-          cp -a "$DIST_DIR/." /tmp/AppDir/
+          cp -a /github/workspace/src/dist/AutoSubSync/. /tmp/AppDir/
           
           printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
           touch /tmp/AppDir/autosubsync.png
