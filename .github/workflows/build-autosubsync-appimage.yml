@@ -3,7 +3,7 @@ name: Build AutoSubSync AppImage
 on:
   push:
     branches: [ main ]
-  pull_request:
+  pull_request: 1
     branches: [ main ]
   workflow_dispatch:
 
@@ -25,8 +25,16 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
-          pip install --no-cache-dir -r requirements.txt
-          pip install --no-cache-dir pyinstaller static-ffmpeg
+          # Find the requirements file even if it is in a subdirectory
+          REQ_PATH=$(find . -name "requirements.txt" | head -n 1)
+          if [ -z "$REQ_PATH" ]; then
+            echo "requirements.txt not found. Installing defaults..."
+            pip install --no-cache-dir pyinstaller static-ffmpeg
+          else
+            echo "Installing from $REQ_PATH"
+            pip install --no-cache-dir -r "$REQ_PATH"
+            pip install --no-cache-dir pyinstaller static-ffmpeg
+          fi
 
       - name: Build static alass
         run: |
@@ -37,13 +45,16 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          mkdir -p ${{ github.workspace }}/src/main/resources/alass-bin
-          cp target/x86_64-unknown-linux-musl/release/alass ${{ github.workspace }}/src/main/resources/alass-bin/alass
-          chmod +x ${{ github.workspace }}/src/main/resources/alass-bin/alass
+          # Find the resource dir in the checked-out code
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          mkdir -p "$RES_DIR/alass-bin"
+          cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass"
+          chmod +x "$RES_DIR/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
-          mkdir -p ${{ github.workspace }}/src/main/resources/ffmpeg-bin
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          mkdir -p "$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
@@ -55,19 +66,24 @@ jobs:
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
         env:
-          DEST_PATH: ${{ github.workspace }}/src/main/resources/ffmpeg-bin
+          DEST_PATH: $(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
 
       - name: Run PyInstaller
         run: |
-          cd ${{ github.workspace }}/src
-          chmod +x main/resources/ffmpeg-bin/*
+          # Find main.py and the resources folder
+          MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
+          APP_DIR=$(dirname "$MAIN_PY")
+          cd "$APP_DIR"
+          
+          # Bundle the relative resources path
           pyinstaller --noconfirm --onedir --windowed \
-          --add-data "main/resources:resources" \
-          main/main.py --name AutoSubSync
+          --add-data "resources:resources" \
+          main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          DIST_DIR=$(find ${{ github.workspace }}/src/dist -maxdepth 1 -type d ! -path ${{ github.workspace }}/src/dist | head -1)
+          # Locate the dist folder created by PyInstaller
+          DIST_DIR=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
           
