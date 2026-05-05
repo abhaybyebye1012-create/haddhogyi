@@ -37,14 +37,14 @@ jobs:
             squashfs-tools upx-ucl pkg-config zip unzip
           echo "System deps installed OK"
 
-      # ── 2. Upgrade pip and install Python build tools ────────────────────────
+      # ── 2. Force Upgrade Pip & Install Build Tools ──────────────────────────
       - name: Upgrade pip and install build tools
         run: |
-          # We must upgrade pip FIRST so it can find modern PyQt6 wheels
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade setuptools wheel
-          # Now install the builders
-          pip install PyQt6-builder sip pyinstaller
+          # Upgrade pip to the latest possible version for Python 3.10
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
+          
+          # Now that pip is modern, it can find PyQt6-builder
+          pip install --root-user-action=ignore PyQt6-builder sip pyinstaller
 
       # ── 3. Clone AutoSubSync source ──────────────────────────────────────────
       - name: Clone AutoSubSync
@@ -56,14 +56,14 @@ jobs:
         run: |
           cd /build/src
           
-          # Force a version of PyQt6 that works on older glibc
-          pip install "PyQt6==6.4.0" "PyQt6-Qt6==6.4.0" "PyQt6-sip"
+          # Force a version of PyQt6 that works on older glibc (6.4.0 is solid for this)
+          pip install --root-user-action=ignore "PyQt6==6.4.0" "PyQt6-Qt6==6.4.0" "PyQt6-sip"
 
           # Install remaining project deps
-          pip install -e "." || true
+          pip install --root-user-action=ignore -e "." || true
 
           # Individual install for safety
-          pip install \
+          pip install --root-user-action=ignore \
             "ffsubsync" "autosubsync" "static-ffmpeg" \
             "rich" "requests" "psutil" "platformdirs" \
             "chardet" "charset-normalizer" "faust-cchardet" || true
