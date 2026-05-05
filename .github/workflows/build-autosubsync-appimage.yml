@@ -18,18 +18,10 @@ jobs:
           apt-get update
           apt-get install -y git wget curl build-essential libgl1-mesa-dev libxkbcommon-x11-0 \
           libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools tree
+          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools
 
       - name: Checkout Source
         uses: actions/checkout@v4
-
-      - name: Install Python Dependencies
-        run: |
-          pip install --no-cache-dir pyinstaller static-ffmpeg
-          REQ_PATH=$(find . -name "requirements.txt" | head -n 1)
-          if [ -n "$REQ_PATH" ]; then
-            pip install --no-cache-dir -r "$REQ_PATH"
-          fi
 
       - name: Build static alass
         run: |
@@ -40,20 +32,18 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          ALASS_BIN=$(find target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -executable | head -n 1)
-          # Use a simpler relative find
-          RES_DIR=$(find . -type d -path "./src/main/resources" -o -path "*/main/resources" | head -n 1)
-          mkdir -p "$RES_DIR/alass-bin"
-          cp "$ALASS_BIN" "$RES_DIR/alass-bin/alass"
-          chmod +x "$RES_DIR/alass-bin/alass"
+          # Hardcoded destination based on your structure
+          mkdir -p "${{ github.workspace }}/src/main/resources/alass-bin"
+          cp target/x86_64-unknown-linux-musl/release/alass "${{ github.workspace }}/src/main/resources/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "${{ github.workspace }}/src/main/resources/alass-bin/alass"
+          chmod +x "${{ github.workspace }}/src/main/resources/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
-          RES_DIR=$(find . -type d -path "./src/main/resources" -o -path "*/main/resources" | head -n 1)
-          mkdir -p "$RES_DIR/ffmpeg-bin"
-          export DEST_PATH="$(pwd)/${RES_DIR#./}/ffmpeg-bin"
+          pip install --no-cache-dir static-ffmpeg
+          mkdir -p "${{ github.workspace }}/src/main/resources/ffmpeg-bin"
+          export DEST_PATH="${{ github.workspace }}/src/main/resources/ffmpeg-bin"
           python3 << 'EOF'
-          import static_ffmpeg, shutil, os, sys
+          import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
           bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
           dest = os.getenv("DEST_PATH")
@@ -61,40 +51,30 @@ jobs:
               src = os.path.join(bin_dir, f)
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
+                  print(f"Copied {f} to {dest}")
           EOF
-          chmod +x "$DEST_PATH/"*
+          chmod +x "${{ github.workspace }}/src/main/resources/ffmpeg-bin/"*
 
       - name: Run PyInstaller
         run: |
-          # Robust finding logic
-          FULL_MAIN_PATH=$(find "$(pwd)" -name "main.py" | head -n 1)
+          pip install --no-cache-dir pyinstaller -r "${{ github.workspace }}/requirements.txt" || pip install --no-cache-dir pyinstaller
+          cd "${{ github.workspace }}/src"
           
-          if [ -z "$FULL_MAIN_PATH" ]; then
-            echo "CRITICAL ERROR: main.py not found anywhere!"
-            echo "Current directory structure:"
-            tree -L 4
-            exit 1
-          fi
-
-          BASE_DIR=$(dirname "$FULL_MAIN_PATH")
-          echo "Switching to: $BASE_DIR"
-          cd "$BASE_DIR"
-          
-          # Run PyInstaller with explicit paths
+          # Using absolute path to main.py
           pyinstaller --noconfirm --onedir --windowed \
-          $(if [ -d "resources" ]; then echo '--add-data resources:resources'; fi) \
-          "$FULL_MAIN_PATH" --name AutoSubSync
+          --add-data "main/resources:resources" \
+          main/main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Find the dist folder based on the previous step
-          DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          # Copy the bundled app to a fresh AppDir
           mkdir -p /tmp/AppDir
-          cp -a "$DIST_DIR"/. /tmp/AppDir/
+          cp -a "${{ github.workspace }}/src/dist/AutoSubSync/." /tmp/AppDir/
           
           printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
           touch /tmp/AppDir/autosubsync.png
           
+          # AppRun script to launch the binary
           printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexec "${HERE}/AutoSubSync" "$@"\n' > /tmp/AppDir/AppRun
           chmod +x /tmp/AppDir/AppRun
 
