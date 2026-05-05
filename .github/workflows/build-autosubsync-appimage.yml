@@ -72,19 +72,14 @@ jobs:
       - name: Run PyInstaller
         run: |
           pip install --no-cache-dir pyinstaller
-          # Navigate to the folder containing main.py
           cd src/main
-          
-          # Check if main.py actually exists here
           if [ ! -f "main.py" ]; then
-            echo "Error: main.py not found in $(pwd)"
+            echo "main.py not found in $(pwd). Listing directory structure:"
             ls -R $GITHUB_WORKSPACE
             exit 1
           fi
-
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
-          
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           --name AutoSubSync \
@@ -96,26 +91,13 @@ jobs:
           mkdir -p /tmp/AppDir
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
-          cat <<EOF > /tmp/AppDir/autosubsync.desktop
-[Desktop Entry]
-Type=Application
-Name=AutoSubSync
-Exec=AutoSubSync
-Icon=autosubsync
-Categories=Utility;
-Terminal=false
-EOF
+          # Create Desktop Entry using printf (safer than heredoc)
+          printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\nTerminal=false\n" > /tmp/AppDir/autosubsync.desktop
           
           touch /tmp/AppDir/autosubsync.png
           
-          cat <<'EOF' > /tmp/AppDir/AppRun
-#!/bin/sh
-SELF=$(readlink -f "$0")
-HERE=${SELF%/*}
-export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
-export PATH="${HERE}:${PATH}"
-exec "${HERE}/AutoSubSync" "$@"
-EOF
+          # Create AppRun using printf (safer than heredoc)
+          printf '#!/bin/sh\nSELF=$(readlink -f "$0")\nHERE=${SELF%%/*}\nexport LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"\nexport PATH="${HERE}:${PATH}"\nexec "${HERE}/AutoSubSync" "$@"\n' > /tmp/AppDir/AppRun
           chmod +x /tmp/AppDir/AppRun
 
       - name: Package AppImage
