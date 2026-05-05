@@ -1,30 +1,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  AutoSubSync AppImage builder — "The Great Bypass" Edition
+#  AutoSubSync AppImage builder — Compatibility Focus
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Build AutoSubSync AppImage (glibc 2.28 compatible)
+name: Build AutoSubSync AppImage
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build inside Debian Buster (glibc 2.28)
+    name: Build for glibc 2.28+ Compatibility
     runs-on: ubuntu-latest
+    # Moving to Bullseye (Debian 11) for better tool support while keeping glibc low
     container:
-      image: python:3.10-slim-buster
+      image: python:3.10-slim-bullseye
 
     steps:
       - name: Install system dependencies
         run: |
-          echo "deb http://archive.debian.org/debian/ buster main" > /etc/apt/sources.list
-          echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
-          apt-get -o Acquire::Check-Valid-Until=false update -q
+          apt-get update -q
           apt-get install -y --no-install-recommends \
             wget curl git ca-certificates xz-utils file \
             binutils patchelf gcc g++ make musl-tools \
             python3-dev libdbus-1-dev pkg-config \
-            libglib2.0-0 libx11-6 libxcb1 libxcb-util0 libxcb-icccm4 \
+            libglib2.0-0 libx11-6 libxcb1 libxcb-util1 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 \
             libxext6 libxrender1 libxkbcommon0 libxkbcommon-x11-0 \
@@ -34,29 +33,21 @@ jobs:
             libasound2 libnss3 libpulse0 \
             squashfs-tools upx-ucl zip unzip
 
-      - name: Force Install Dependencies
+      - name: Install Python Environment
         run: |
           python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
-          
-          # Force install PyQt6 by allowing older manylinux standards
-          pip install --root-user-action=ignore \
-            --only-binary=:all: \
-            --platform manylinux2014_x86_64 \
-            "PyQt6==6.4.0" "PyQt6-Qt6==6.4.0" "PyQt6-sip"
-          
-          # Install PyInstaller and core deps
-          pip install --root-user-action=ignore pyinstaller static-ffmpeg rich requests psutil platformdirs chardet charset-normalizer
+          # On Bullseye, these should install normally without "Not Found" errors
+          pip install --root-user-action=ignore pyinstaller PyQt6 PyQt6-Qt6 PyQt6-sip static-ffmpeg
 
-      - name: Clone and Patch Source
+      - name: Clone and Install Source
         run: |
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
           cd /build/src
-          # Install the app itself without the dev-deps that require builders
-          pip install --root-user-action=ignore . --no-deps
-          # Install subsync tools
-          pip install --root-user-action=ignore ffsubsync autosubsync
+          # Install core requirements
+          pip install --root-user-action=ignore .
+          pip install --root-user-action=ignore ffsubsync autosubsync rich requests psutil platformdirs chardet charset-normalizer
 
-      - name: Build alass (musl-static)
+      - name: Build static alass
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
           export PATH="$HOME/.cargo/bin:$PATH"
@@ -67,38 +58,36 @@ jobs:
           mkdir -p /build/src/main/resources/alass-bin
           cp target/x86_64-unknown-linux-musl/release/alass-cli /build/src/main/resources/alass-bin/alass
 
-      - name: Bundle ffmpeg
+      - name: Prepare ffmpeg
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
           python -m static_ffmpeg.add_paths
-          # Grab the paths directly from the environment
           FFMPEG_BIN=$(python -c "import static_ffmpeg; print(static_ffmpeg.add_paths()[0])")
           FFPROBE_BIN=$(python -c "import static_ffmpeg; print(static_ffmpeg.add_paths()[1])")
           cp "$FFMPEG_BIN" /build/src/main/resources/ffmpeg-bin/ffmpeg
           cp "$FFPROBE_BIN" /build/src/main/resources/ffmpeg-bin/ffprobe
           chmod +x /build/src/main/resources/ffmpeg-bin/*
 
-      - name: Build AppImage
+      - name: Run PyInstaller
         run: |
-          # Setup resources
-          mkdir -p /build/src/main/resources/autosubsync
-          echo -e "#!/usr/bin/env python3\nfrom autosubsync.main import main\nif __name__=='__main__': import sys; sys.exit(main())" > /build/src/main/resources/autosubsync/autosubsync
-          chmod +x /build/src/main/resources/autosubsync/autosubsync
-          
-          # Run PyInstaller
           cd /build/src
-          pyinstaller build.spec --noconfirm
+          # Create internal runner
+          mkdir -p main/resources/autosubsync
+          echo -e "#!/usr/bin/env python3\nfrom autosubsync.main import main\nif __name__=='__main__': import sys; sys.exit(main())" > main/resources/autosubsync/autosubsync
+          chmod +x main/resources/autosubsync/autosubsync
           
-          # Create AppDir
+          pyinstaller build.spec --noconfirm
+
+      - name: Create AppImage
+        run: |
           DIST_DIR=$(find /build/src/dist -maxdepth 1 -type d ! -path /build/src/dist | head -1)
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
-          # AppRun script
+          # AppRun with standard search paths
           echo -e '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"\nexport PATH="$HERE/_internal/resources/ffmpeg-bin:$HERE/_internal/resources/alass-bin:$PATH"\nexport LD_LIBRARY_PATH="$HERE/_internal:$HERE:$LD_LIBRARY_PATH"\nexec "$HERE/AutoSubSync" "$@"' > /build/AppDir/AppRun
           chmod +x /build/AppDir/AppRun
           
-          # Package
           cd /build
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
@@ -107,5 +96,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: AutoSubSync-Final
+          name: AutoSubSync-Linux
           path: /build/AutoSubSync-linux-amd64.AppImage
