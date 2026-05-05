@@ -1,31 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  AutoSubSync AppImage builder — compatible with glibc 2.28 (Debian Buster)
+#
+#  HOW TO USE:
+#    1. Create a NEW empty GitHub repo (e.g. "my-autosubsync-build")
+#    2. Inside that repo create the path:  .github/workflows/
+#    3. Save THIS file as:  .github/workflows/build-autosubsync-appimage.yml
+#    4. Go to your repo → Actions tab → "Build AutoSubSync AppImage" → Run workflow
+#    5. Wait ~25–40 minutes for it to finish
+#    6. Download the artifact from the completed run — that's your AppImage
+#
+#  WHY THIS WORKS:
+#    The official AppImage is built on Ubuntu 22.04 (glibc 2.35).
+#    This workflow builds INSIDE a Debian Buster container (glibc 2.28),
+#    so every bundled .so file requires at most glibc 2.28 — exactly what
+#    your machine has.  alass is compiled from source targeting musl (fully
+#    static, zero glibc dependency), so it also works on your machine.
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: Build AutoSubSync AppImage (glibc 2.28 compatible)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # ← manual trigger only — go to Actions tab and click "Run workflow"
 
 jobs:
   build:
+    name: Build inside Debian Buster (glibc 2.28)
     runs-on: ubuntu-latest
+
+    # ── CRITICAL: run every step inside Debian Buster (glibc 2.28) ───────────
+    # python:3.10-slim-buster = Python 3.10 on Debian 10 = glibc 2.28
+    # All compiled code in this container will require at most glibc 2.28.
     container:
       image: python:3.10-slim-buster
 
     steps:
-      # 1. Fix Debian Buster repos
-      - name: Fix Debian Buster repositories
-        run: |
-          sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-          apt-get update -q
 
-      # 2. Install system dependencies
+      # ── 1. Install system libraries required by Qt6 and build tools ─────────
       - name: Install system dependencies
         run: |
+          apt-get update -q
           apt-get install -y --no-install-recommends \
             wget curl git ca-certificates xz-utils file \
             binutils patchelf \
             gcc make musl-tools \
             libglib2.0-0 libglib2.0-dev \
-            libx11-6 libxcb1 libxcb-icccm4 libxcb-image0 \
+            libx11-6 libxcb1 libxcb-util1 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 \
             libxext6 libxrender1 libxkbcommon0 libxkbcommon-x11-0 \
@@ -35,131 +54,329 @@ jobs:
             libasound2 libnss3 libpulse0 \
             squashfs-tools upx-ucl \
             pkg-config zip unzip
+          echo "System deps installed OK"
 
-      # 3. Upgrade pip and install Python build tools
+      # ── 2. Upgrade pip and install Python build tools ────────────────────────
       - name: Upgrade pip and install build tools
         run: |
           python -m pip install --upgrade pip setuptools wheel
+          # PyInstaller 6.x supports Python 3.10 and produces glibc-2.17 bootloaders
           pip install "pyinstaller>=6.0,<7.0"
+          echo "PyInstaller version: $(pyinstaller --version)"
 
-      # 4. Clone AutoSubSync source
+      # ── 3. Clone AutoSubSync source ──────────────────────────────────────────
       - name: Clone AutoSubSync
         run: |
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
+          echo "=== AutoSubSync version ==="
           cat /build/src/main/VERSION
 
-      # 5. Install Python dependencies
+      # ── 4. Install all Python dependencies from the project ─────────────────
       - name: Install Python dependencies
         run: |
           cd /build/src
+
+          # Install the package in editable mode (pulls in ALL deps from pyproject.toml)
+          # This installs: PyQt6, ffsubsync, autosubsync, static-ffmpeg, rich, requests, etc.
           pip install -e ".[dev]" || pip install -e "."
+
+          # Also install individually to be safe
           pip install \
-            PyQt6 ffsubsync autosubsync static-ffmpeg rich requests \
-            psutil platformdirs chardet charset-normalizer
+            "PyQt6" \
+            "ffsubsync" \
+            "autosubsync" \
+            "static-ffmpeg" \
+            "rich" \
+            "requests" \
+            "psutil" \
+            "platformdirs" \
+            "chardet" \
+            "charset-normalizer"
+
+          # faust-cchardet only works on Python < 3.13
           pip install "faust-cchardet" 2>/dev/null || true
 
-      # 6. Prepare ffmpeg binaries
+          echo "=== Installed PyQt6 version ==="
+          python -c "import PyQt6.QtCore; print('PyQt6:', PyQt6.QtCore.PYQT_VERSION_STR)"
+          echo "=== Python version ==="
+          python --version
+
+      # ── 5. Get ffmpeg + ffprobe via the static-ffmpeg Python package ─────────
+      # static-ffmpeg downloads pre-built static binaries (glibc 2.17 compatible)
       - name: Prepare ffmpeg binaries
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
-python << 'PYEOF'
-import static_ffmpeg, shutil, os
-ffmpeg_path, ffprobe_path = static_ffmpeg.add_paths()
-dest = "/build/src/main/resources/ffmpeg-bin"
-shutil.copy2(ffmpeg_path,  os.path.join(dest, "ffmpeg"))
-shutil.copy2(ffprobe_path, os.path.join(dest, "ffprobe"))
-os.chmod(os.path.join(dest, "ffmpeg"),  0o755)
-os.chmod(os.path.join(dest, "ffprobe"), 0o755)
-PYEOF
 
-      # 7. Build alass (musl-static binary)
-      - name: Build alass
+          python << 'PYEOF'
+          import static_ffmpeg
+          import shutil, os
+
+          # This downloads static ffmpeg if not already cached
+          ffmpeg_path, ffprobe_path = static_ffmpeg.add_paths()
+          print(f"ffmpeg  : {ffmpeg_path}")
+          print(f"ffprobe : {ffprobe_path}")
+
+          dest = "/build/src/main/resources/ffmpeg-bin"
+          shutil.copy2(ffmpeg_path,  os.path.join(dest, "ffmpeg"))
+          shutil.copy2(ffprobe_path, os.path.join(dest, "ffprobe"))
+          os.chmod(os.path.join(dest, "ffmpeg"),  0o755)
+          os.chmod(os.path.join(dest, "ffprobe"), 0o755)
+          print("Copied ffmpeg/ffprobe to resources/ffmpeg-bin/")
+          PYEOF
+
+          echo "=== ffmpeg version ==="
+          /build/src/main/resources/ffmpeg-bin/ffmpeg -version 2>&1 | head -2
+
+          echo "=== ffmpeg glibc requirement ==="
+          objdump -p /build/src/main/resources/ffmpeg-bin/ffmpeg 2>/dev/null \
+            | grep GLIBC | sort -V | tail -3 \
+            || echo "(static binary — no glibc dependency)"
+
+      # ── 6. Build alass from source using musl (fully static binary) ──────────
+      # This guarantees alass works on ANY Linux kernel, regardless of glibc.
+      # Pre-built alass binaries from GitHub releases may require glibc 2.31+,
+      # which would break on your glibc 2.28 machine.
+      - name: Build alass (musl-static binary)
         run: |
           mkdir -p /build/src/main/resources/alass-bin
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
+
+          # ── Install Rust toolchain ──────────────────────────────────────────
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --no-modify-path
           export PATH="$HOME/.cargo/bin:$PATH"
+
+          # ── Add musl target for a fully static binary ───────────────────────
           rustup target add x86_64-unknown-linux-musl
+
+          # ── Clone and build alass ───────────────────────────────────────────
           git clone --depth 1 https://github.com/kaegi/alass.git /build/alass-src
           cd /build/alass-src/alass-cli
           cargo build --release --target x86_64-unknown-linux-musl
-          cp target/x86_64-unknown-linux-musl/release/alass-cli /build/src/main/resources/alass-bin/alass
+          cp target/x86_64-unknown-linux-musl/release/alass-cli \
+             /build/src/main/resources/alass-bin/alass
           chmod +x /build/src/main/resources/alass-bin/alass
 
-      # 8. Prepare autosubsync binary
+          echo "=== alass binary info ==="
+          file /build/src/main/resources/alass-bin/alass
+          ldd /build/src/main/resources/alass-bin/alass 2>&1 \
+            || echo "(confirmed: static binary — no dynamic dependencies)"
+          /build/src/main/resources/alass-bin/alass --version
+
+      # ── 7. Prepare the autosubsync binary ───────────────────────────────────
+      # AutoSubSync calls autosubsync as a subprocess using sys.executable.
+      # We copy the pip-installed entry point script into resources.
       - name: Prepare autosubsync binary
         run: |
           mkdir -p /build/src/main/resources/autosubsync
-          AUTOSUBSYNC_SCRIPT=$(which autosubsync 2>/dev/null || python -c "import sysconfig; print(sysconfig.get_path('scripts'))")/autosubsync
+
+          # Find the installed autosubsync script
+          AUTOSUBSYNC_SCRIPT=$(which autosubsync 2>/dev/null || \
+            python -c "import sysconfig; print(sysconfig.get_path('scripts'))")/autosubsync
+
           if [ -f "$AUTOSUBSYNC_SCRIPT" ]; then
             cp "$AUTOSUBSYNC_SCRIPT" /build/src/main/resources/autosubsync/autosubsync
             chmod +x /build/src/main/resources/autosubsync/autosubsync
+            echo "Copied autosubsync script from: $AUTOSUBSYNC_SCRIPT"
+            head -3 /build/src/main/resources/autosubsync/autosubsync
           else
-python << 'PYEOF'
-import os
-path = "/build/src/main/resources/autosubsync/autosubsync"
-script_content = """#!/usr/bin/env python3
-import sys
-try:
-    from autosubsync.__main__ import main
-except ImportError:
-    from autosubsync.main import main
-if __name__ == '__main__':
-    sys.exit(main())
-"""
-with open(path, 'w') as f: f.write(script_content)
-os.chmod(path, 0o755)
-PYEOF
+            # Fallback: create a runner script from the module
+            python << 'PYEOF'
+          import os, sys
+          script_content = """#!/usr/bin/env python3
+          import sys
+          try:
+              from autosubsync.__main__ import main
+          except ImportError:
+              from autosubsync.main import main
+          if __name__ == '__main__':
+              sys.exit(main())
+          """
+          path = "/build/src/main/resources/autosubsync/autosubsync"
+          with open(path, 'w') as f:
+              f.write(script_content)
+          os.chmod(path, 0o755)
+          print(f"Created autosubsync runner at {path}")
+          PYEOF
           fi
 
-      # 9. Build with PyInstaller
+          echo "=== Resource directories ready ==="
+          ls -la /build/src/main/resources/ffmpeg-bin/
+          ls -la /build/src/main/resources/alass-bin/
+          ls -la /build/src/main/resources/autosubsync/
+
+      # ── 8. Run PyInstaller with the project's own build.spec ────────────────
       - name: Build with PyInstaller
         run: |
           cd /build/src
-          pyinstaller build.spec --noconfirm
-          ls -la dist/
 
-      # 10. Find dist directory
+          # PyInstaller must run from the project root (build.spec uses os.curdir)
+          pyinstaller build.spec --noconfirm
+
+          echo "=== PyInstaller output ==="
+          ls -la dist/
+          ls -la dist/AutoSubSync/ 2>/dev/null || ls -la dist/*/
+
+      # ── 9. Locate dist directory and set env var ─────────────────────────────
       - name: Find PyInstaller dist directory
         run: |
           DIST_DIR=$(find /build/src/dist -maxdepth 1 -type d ! -path /build/src/dist | head -1)
           echo "DIST_DIR=$DIST_DIR" >> $GITHUB_ENV
+          echo "Found dist dir: $DIST_DIR"
           ls -la "$DIST_DIR"
 
-      # 11. Create AppDir
+      # ── 10. Verify glibc requirements of bundled libraries ──────────────────
+      - name: Check glibc requirements in bundle
+        run: |
+          echo "=== Top 10 highest glibc requirements in the bundle ==="
+          find "$DIST_DIR" -type f \( -name "*.so*" -o -name "AutoSubSync" \) 2>/dev/null \
+            | while read f; do
+                MAX=$(objdump -p "$f" 2>/dev/null \
+                  | grep -oP 'GLIBC_\K[0-9.]+' \
+                  | sort -V | tail -1)
+                [ -n "$MAX" ] && echo "$MAX  $f"
+              done \
+            | sort -V | tail -10 || true
+
+          echo ""
+          echo "NOTE: All values should be ≤ 2.28 (your machine's glibc version)"
+
+      # ── 11. Create AppDir structure ─────────────────────────────────────────
       - name: Create AppDir
         run: |
           rm -rf /build/AppDir
           mkdir -p /build/AppDir
+
+          # Copy everything from PyInstaller dist into AppDir root
           cp -a "$DIST_DIR"/. /build/AppDir/
+
+          # ── Icon ─────────────────────────────────────────────────────────────
           ICON=$(find /build/src/main/assets -name "*.png" 2>/dev/null | head -1)
           if [ -n "$ICON" ]; then
             cp "$ICON" /build/AppDir/autosubsync.png
+            echo "Icon: $ICON"
           else
-            wget -q "https://raw.githubusercontent.com/denizsafak/AutoSubSync/main/images/AutoSubSync1.png" -O /build/AppDir/autosubsync.png
+            # Download icon from the repo
+            wget -q "https://raw.githubusercontent.com/denizsafak/AutoSubSync/main/images/AutoSubSync1.png" \
+              -O /build/AppDir/autosubsync.png 2>/dev/null || true
           fi
-          cat > /build/AppDir/autosubsync.desktop <<EOF
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=AutoSubSync
-Comment=Automatic Subtitle Synchronization Tool
-Exec=AutoSubSync
-Icon=autosubsync
-Categories=AudioVideo;Video;
-Terminal=false
-EOF
 
-      # 12. Create AppRun
-      - name: Create AppRun
-        run: |
-          cat > /build/AppDir/AppRun <<'APPRUN'
-#!/bin/bash
-HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"
-INTERNAL="$HERE/_internal"
-[ -d "$INTERNAL" ] || INTERNAL="$HERE"
-export PATH="$INTERNAL/resources/ffmpeg-bin:$INTERNAL/resources/alass-bin:$INTERNAL:$HERE:$PATH"
-export LD_LIBRARY_PATH="$INTERNAL:$HERE:${LD_LIBRARY_PATH:-}"
-[ -d "$INTERNAL/platforms" ] && export QT_QPA_PLATFORM_PLUGIN_PATH="$INTERNAL/platforms"
-exec "$INTERNAL/AutoSubSync" "$@"
-APPRUN
+          # ── .desktop file ────────────────────────────────────────────────────
+          cat > /build/AppDir/autosubsync.desktop << 'EOF'
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=AutoSubSync
+          Comment=Automatic Subtitle Synchronization Tool
+          Exec=AutoSubSync
+          Icon=autosubsync
+          Categories=AudioVideo;Video;
+          Terminal=false
+          EOF
+          # Remove leading spaces (heredoc artifact)
+          sed -i 's/^[[:space:]]*//' /build/AppDir/autosubsync.desktop
+
+          # ── AppRun entry point ───────────────────────────────────────────────
+          # This script is the first thing run when you launch the AppImage.
+          # It sets up the environment so bundled ffmpeg, alass, etc. are found.
+          cat > /build/AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          # AutoSubSync AppRun — built for glibc 2.28 compatibility
+
+          HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"
+
+          # PyInstaller 6.x puts bundled libs in _internal/
+          INTERNAL="$HERE/_internal"
+          [ -d "$INTERNAL" ] || INTERNAL="$HERE"
+
+          # ── Make bundled ffmpeg, ffprobe, alass findable via PATH ───────────
+          export PATH="$INTERNAL/resources/ffmpeg-bin:$INTERNAL/resources/alass-bin:$INTERNAL:$HERE:$PATH"
+
+          # ── Shared library path ─────────────────────────────────────────────
+          export LD_LIBRARY_PATH="$INTERNAL:$HERE:${LD_LIBRARY_PATH:-}"
+
+          # ── Qt platform plugin (required for PyQt6 GUI) ─────────────────────
+          # Try several possible locations where PyInstaller may have placed them
+          for QT_PLUGINS in \
+            "$INTERNAL/PyQt6/Qt6/plugins" \
+            "$INTERNAL/PyQt6_Qt6/Qt6/plugins" \
+            "$INTERNAL/platforms/.." \
+            "$HERE/platforms/.."
+          do
+            if [ -d "$QT_PLUGINS/platforms" ]; then
+              export QT_PLUGIN_PATH="$QT_PLUGINS"
+              break
+            fi
+          done
+
+          # Also tell Qt where the bundled platforms dir is (legacy path)
+          if [ -d "$INTERNAL/platforms" ]; then
+            export QT_QPA_PLATFORM_PLUGIN_PATH="$INTERNAL/platforms"
+          fi
+
+          # ── Qt display settings ─────────────────────────────────────────────
+          export QT_AUTO_SCREEN_SCALE_FACTOR=0
+          export QT_SCALE_FACTOR="${QT_SCALE_FACTOR:-1}"
+
+          # ── XDG dirs so Qt/D-Bus work on minimal desktops ──────────────────
+          export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+          mkdir -p "$XDG_RUNTIME_DIR"
+
+          # ── Launch the application ──────────────────────────────────────────
+          exec "$HERE/AutoSubSync" "$@"
+          APPRUN
+          sed -i 's/^[[:space:]]*//' /build/AppDir/AppRun
           chmod +x /build/AppDir/AppRun
+
+          echo "=== AppDir contents ==="
+          ls -la /build/AppDir/
+          echo ""
+          echo "=== Internal dir sample ==="
+          ls /build/AppDir/_internal/ 2>/dev/null | head -20 || ls /build/AppDir/ | head -20
+
+      # ── 12. Package as AppImage ─────────────────────────────────────────────
+      - name: Create AppImage
+        run: |
+          cd /build
+
+          # Download appimagetool
+          wget -q \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
+            -O appimagetool
+          chmod +x appimagetool
+
+          # Extract appimagetool — required in Docker (no FUSE available)
+          # APPIMAGE_EXTRACT_AND_RUN=1 tells AppImage runtime to work without FUSE
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --appimage-extract 2>/dev/null \
+            || ./appimagetool --appimage-extract \
+            || (echo "Trying unsquashfs fallback..." && unsquashfs -d squashfs-root appimagetool)
+
+          ls squashfs-root/
+
+          # Build the AppImage
+          # ARCH=x86_64 is required by appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./squashfs-root/AppRun \
+            /build/AppDir \
+            /build/AutoSubSync-linux-amd64.AppImage
+
+          chmod +x /build/AutoSubSync-linux-amd64.AppImage
+
+          echo "=== AppImage created ==="
+          ls -lh /build/AutoSubSync-linux-amd64.AppImage
+
+      # ── 13. Copy to workspace so upload-artifact can find it ─────────────────
+      - name: Copy AppImage to workspace
+        run: |
+          # $GITHUB_WORKSPACE is mounted into the container and accessible to actions
+          cp /build/AutoSubSync-linux-amd64.AppImage \
+             "${GITHUB_WORKSPACE}/AutoSubSync-linux-amd64-glibc228.AppImage"
+          ls -lh "${GITHUB_WORKSPACE}/AutoSubSync-linux-amd64-glibc228.AppImage"
+
+      # ── 14. Upload as downloadable artifact ──────────────────────────────────
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoSubSync-AppImage-glibc228-compatible
+          path: AutoSubSync-linux-amd64-glibc228.AppImage
+          # Artifact is kept for 30 days — download it from the Actions run page
+          retention-days: 30
