@@ -13,15 +13,14 @@ jobs:
 
     steps:
 
-      # ── 1. Fix Debian Buster repositories ────────────────────────────────
+      # 1. Fix Debian Buster repositories
       - name: Fix Debian Buster repositories
         run: |
           sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
           apt-get update -q
-          echo "Debian Buster archive repos configured OK"
 
-      # ── 2. Install system dependencies ──────────────────────────────────
+      # 2. Install system dependencies
       - name: Install system dependencies
         run: |
           apt-get install -y --no-install-recommends \
@@ -39,22 +38,20 @@ jobs:
             libasound2 libnss3 libpulse0 \
             squashfs-tools upx-ucl \
             pkg-config zip unzip
-          echo "System deps installed OK"
 
-      # ── 3. Upgrade pip and install Python build tools ─────────────────
+      # 3. Upgrade pip and install Python build tools
       - name: Upgrade pip and install build tools
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install "pyinstaller>=6.0,<7.0"
-          echo "PyInstaller version: $(pyinstaller --version)"
 
-      # ── 4. Clone AutoSubSync source ───────────────────────────────────
+      # 4. Clone AutoSubSync source
       - name: Clone AutoSubSync
         run: |
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
           cat /build/src/main/VERSION
 
-      # ── 5. Install all Python dependencies ─────────────────────────────
+      # 5. Install all Python dependencies
       - name: Install Python dependencies
         run: |
           cd /build/src
@@ -71,10 +68,8 @@ jobs:
             "chardet" \
             "charset-normalizer"
           pip install "faust-cchardet" 2>/dev/null || true
-          python -c "import PyQt6.QtCore; print('PyQt6:', PyQt6.QtCore.PYQT_VERSION_STR)"
-          python --version
 
-      # ── 6. Prepare ffmpeg binaries ─────────────────────────────────────
+      # 6. Prepare ffmpeg binaries
       - name: Prepare ffmpeg binaries
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
@@ -88,7 +83,7 @@ os.chmod(os.path.join(dest, "ffmpeg"),  0o755)
 os.chmod(os.path.join(dest, "ffprobe"), 0o755)
 PYEOF
 
-      # ── 7. Build alass (musl-static binary) ─────────────────────────────
+      # 7. Build alass (musl-static binary)
       - name: Build alass (musl-static binary)
         run: |
           mkdir -p /build/src/main/resources/alass-bin
@@ -101,7 +96,7 @@ PYEOF
           cp target/x86_64-unknown-linux-musl/release/alass-cli /build/src/main/resources/alass-bin/alass
           chmod +x /build/src/main/resources/alass-bin/alass
 
-      # ── 8. Prepare autosubsync binary ───────────────────────────────────
+      # 8. Prepare autosubsync binary
       - name: Prepare autosubsync binary
         run: |
           mkdir -p /build/src/main/resources/autosubsync
@@ -127,29 +122,32 @@ os.chmod(path, 0o755)
 PYEOF
           fi
 
-      # ── 9. Build with PyInstaller ───────────────────────────────────────
+      # 9. Build with PyInstaller
       - name: Build with PyInstaller
         run: |
           cd /build/src
           pyinstaller build.spec --noconfirm
           ls -la dist/
 
-      # ── 10. Find dist directory ─────────────────────────────────────────
+      # 10. Find dist directory
       - name: Find PyInstaller dist directory
         run: |
           DIST_DIR=$(find /build/src/dist -maxdepth 1 -type d ! -path /build/src/dist | head -1)
           echo "DIST_DIR=$DIST_DIR" >> $GITHUB_ENV
           ls -la "$DIST_DIR"
 
-      # ── 11. Create AppDir ───────────────────────────────────────────────
+      # 11. Create AppDir
       - name: Create AppDir
         run: |
           rm -rf /build/AppDir
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           ICON=$(find /build/src/main/assets -name "*.png" 2>/dev/null | head -1)
-          [ -n "$ICON" ] && cp "$ICON" /build/AppDir/autosubsync.png || \
+          if [ -n "$ICON" ]; then
+            cp "$ICON" /build/AppDir/autosubsync.png
+          else
             wget -q "https://raw.githubusercontent.com/denizsafak/AutoSubSync/main/images/AutoSubSync1.png" -O /build/AppDir/autosubsync.png
+          fi
           cat > /build/AppDir/autosubsync.desktop << 'EOF'
 [Desktop Entry]
 Version=1.0
@@ -163,7 +161,7 @@ Terminal=false
 EOF
           sed -i 's/^[[:space:]]*//' /build/AppDir/autosubsync.desktop
 
-      # ── 12. Create AppRun ──────────────────────────────────────────────
+      # 12. Create AppRun
       - name: Create AppRun
         run: |
           cat > /build/AppDir/AppRun << 'APPRUN'
@@ -178,7 +176,7 @@ exec "$INTERNAL/AutoSubSync" "$@"
 APPRUN
           chmod +x /build/AppDir/AppRun
 
-      # ── 13. Build AppImage ─────────────────────────────────────────────
+      # 13. Build AppImage
       - name: Build AppImage
         run: |
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /build/appimagetool
@@ -186,7 +184,7 @@ APPRUN
           APPIMAGE_EXTRACT_AND_RUN=1 /build/appimagetool /build/AppDir /build/AutoSubSync-x86_64.AppImage
           ls -lh /build/AutoSubSync-x86_64.AppImage
 
-      # ── 14. Optional: Sign AppImage ───────────────────────────────────
+      # 14. Optional: Sign AppImage
       - name: Sign AppImage
         if: secrets.GPG_PRIVATE_KEY != ''
         env:
@@ -197,7 +195,7 @@ APPRUN
               --output /build/AutoSubSync-x86_64.AppImage.sig \
               --detach-sign /build/AutoSubSync-x86_64.AppImage
 
-      # ── 15. Upload AppImage and signature ─────────────────────────────
+      # 15. Upload artifacts
       - name: Upload AppImage and signature
         uses: actions/upload-artifact@v3
         with:
