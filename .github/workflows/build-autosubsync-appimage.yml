@@ -37,14 +37,12 @@ jobs:
           cd $GITHUB_WORKSPACE
           mkdir -p src/main/resources/alass-bin
           
-          # Find the actual binary and copy it specifically to 'alass'
           ALASS_BIN=$(find /tmp/alass-src/target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -name "alass*" | head -n 1)
           if [ -f "$ALASS_BIN" ]; then
             cp "$ALASS_BIN" src/main/resources/alass-bin/alass
             chmod +x src/main/resources/alass-bin/alass
           else
-            echo "Alass binary not found after build"
-            exit 1
+            echo "Alass binary not found" && exit 1
           fi
 
       - name: Prepare ffmpeg
@@ -53,20 +51,38 @@ jobs:
           mkdir -p src/main/resources/ffmpeg-bin
           export DEST_PATH="$GITHUB_WORKSPACE/src/main/resources/ffmpeg-bin"
           python3 << 'EOF'
-import static_ffmpeg, shutil, os
-static_ffmpeg.add_paths()
-# Searching for the bin directory dynamically
-import static_ffmpeg.run as sfr
-bin_dir = os.path.join(os.path.dirname(sfr.__file__), "bin", "linux")
-dest = os.getenv("DEST_PATH")
-for f in ["ffmpeg", "ffprobe"]:
-    src = os.path.join(bin_dir, f)
-    if os.path.exists(src):
-        shutil.copy2(src, os.path.join(dest, f))
-    else:
-        print(f"Warning: {f} not found at {src}")
+import os, shutil, sys
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+    # Find package location dynamically
+    import static_ffmpeg.run as sfr
+    bin_dir = os.path.join(os.path.dirname(sfr.__file__), "bin", "linux")
+    
+    dest = os.getenv("DEST_PATH")
+    found = False
+    if os.path.exists(bin_dir):
+        for f in ["ffmpeg", "ffprobe"]:
+            src = os.path.join(bin_dir, f)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(dest, f))
+                found = True
+    
+    if not found:
+        print("static-ffmpeg binaries not found in package. Falling back to direct download...")
+        sys.exit(1)
+except Exception as e:
+    print(f"Error: {e}")
+    sys.exit(1)
 EOF
-          chmod +x "$DEST_PATH/"*
+        # If the python script fails, manually grab stable static binaries as a backup
+        if [ $? -ne 0 ]; then
+          echo "Python ffmpeg prep failed, using manual download..."
+          wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar -xJf ffmpeg-release-amd64-static.tar.xz
+          cp ffmpeg-*-amd64-static/ffmpeg ffmpeg-*-amd64-static/ffprobe src/main/resources/ffmpeg-bin/
+        fi
+        chmod +x src/main/resources/ffmpeg-bin/*
 
       - name: Run PyInstaller
         run: |
@@ -84,11 +100,8 @@ EOF
         run: |
           rm -rf /tmp/AppDir
           mkdir -p /tmp/AppDir
-          
-          # Copy PyInstaller distribution
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
-          # Create Desktop Entry
           cat <<EOF > /tmp/AppDir/autosubsync.desktop
 [Desktop Entry]
 Type=Application
@@ -96,13 +109,9 @@ Name=AutoSubSync
 Exec=AutoSubSync
 Icon=autosubsync
 Categories=Utility;
-Terminal=false
 EOF
-          
-          # Create placeholder icon
           touch /tmp/AppDir/autosubsync.png
           
-          # Create AppRun entry point
           cat <<'EOF' > /tmp/AppDir/AppRun
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "${0}")")"
@@ -116,10 +125,7 @@ EOF
           cd /tmp
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          
-          # Extract because GitHub runners lack FUSE support
           ./appimagetool --appimage-extract
-          
           export ARCH=x86_64
           ./squashfs-root/AppRun /tmp/AppDir /tmp/AutoSubSync-x86_64.AppImage
 
