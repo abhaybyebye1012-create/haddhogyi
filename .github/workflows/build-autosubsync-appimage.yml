@@ -32,16 +32,18 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Hardcoded destination based on your structure
-          mkdir -p "${{ github.workspace }}/src/main/resources/alass-bin"
-          cp target/x86_64-unknown-linux-musl/release/alass "${{ github.workspace }}/src/main/resources/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "${{ github.workspace }}/src/main/resources/alass-bin/alass"
-          chmod +x "${{ github.workspace }}/src/main/resources/alass-bin/alass"
+          # Find the resources folder wherever it is
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | head -n 1)
+          mkdir -p "$RES_DIR/alass-bin"
+          cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
+          chmod +x "$RES_DIR/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          mkdir -p "${{ github.workspace }}/src/main/resources/ffmpeg-bin"
-          export DEST_PATH="${{ github.workspace }}/src/main/resources/ffmpeg-bin"
+          RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | head -n 1)
+          mkdir -p "$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
@@ -51,30 +53,36 @@ jobs:
               src = os.path.join(bin_dir, f)
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
-                  print(f"Copied {f} to {dest}")
           EOF
-          chmod +x "${{ github.workspace }}/src/main/resources/ffmpeg-bin/"*
+          chmod +x "$RES_DIR/ffmpeg-bin/"*
 
       - name: Run PyInstaller
         run: |
-          pip install --no-cache-dir pyinstaller -r "${{ github.workspace }}/requirements.txt" || pip install --no-cache-dir pyinstaller
-          cd "${{ github.workspace }}/src"
+          # Find main.py location
+          MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
+          APP_DIR=$(dirname "$MAIN_PY")
+          cd "$APP_DIR"
           
-          # Using absolute path to main.py
+          pip install --no-cache-dir pyinstaller
+          # Install requirements if they exist in this folder or parent
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          if [ -f "../requirements.txt" ]; then pip install -r ../requirements.txt; fi
+          
+          # Build from the directory where main.py lives
           pyinstaller --noconfirm --onedir --windowed \
-          --add-data "main/resources:resources" \
-          main/main.py --name AutoSubSync
+          --add-data "resources:resources" \
+          main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Copy the bundled app to a fresh AppDir
+          # Find the dist/AutoSubSync folder that PyInstaller just created
+          DIST_PATH=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
-          cp -a "${{ github.workspace }}/src/dist/AutoSubSync/." /tmp/AppDir/
+          cp -a "$DIST_PATH/." /tmp/AppDir/
           
           printf "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;\n" > /tmp/AppDir/autosubsync.desktop
           touch /tmp/AppDir/autosubsync.png
           
-          # AppRun script to launch the binary
           printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexec "${HERE}/AutoSubSync" "$@"\n' > /tmp/AppDir/AppRun
           chmod +x /tmp/AppDir/AppRun
 
