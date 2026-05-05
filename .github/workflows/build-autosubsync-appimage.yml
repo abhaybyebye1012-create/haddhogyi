@@ -129,22 +129,14 @@ jobs:
           mkdir -p /build/AppDir
           cp -a "$DIST_DIR"/. /build/AppDir/
           
-          # 1. Create the REQUIRED .desktop file
-          cat > /build/AppDir/autosubsync.desktop << 'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=AutoSubSync
-          Exec=AutoSubSync
-          Icon=autosubsync
-          Categories=Utility;
-          EOF
-
-          # 2. Provide a placeholder icon (even a blank one works)
+          # Create the desktop file
+          echo -e "[Desktop Entry]\nType=Application\nName=AutoSubSync\nExec=AutoSubSync\nIcon=autosubsync\nCategories=Utility;" > /build/AppDir/autosubsync.desktop
           touch /build/AppDir/autosubsync.png
 
-          # 3. Create the AppRun script
-          echo -e '#!/bin/bash\nHERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"\nexport PATH="$HERE/_internal/resources/ffmpeg-bin:$HERE/_internal/resources/alass-bin:$PATH"\nexport LD_LIBRARY_PATH="$HERE/_internal:$HERE:$LD_LIBRARY_PATH"\nexec "$HERE/AutoSubSync" "$@"' > /build/AppDir/AppRun
-          chmod +x /build/AppDir/AppRun
+          # DELETE the script and just link the binary as AppRun
+          # This removes the possibility of "exec format" errors caused by shell scripts
+          rm -f /build/AppDir/AppRun
+          ln -s AutoSubSync /build/AppDir/AppRun
 
       - name: Package AppImage
         run: |
