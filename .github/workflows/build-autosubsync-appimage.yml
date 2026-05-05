@@ -20,16 +20,11 @@ jobs:
           libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
           libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils
 
-      # FIXED: Using official checkout instead of raw git clone
       - name: Checkout Source
         uses: actions/checkout@v4
-        with:
-          repository: v8952/AutoSubSync
-          path: build
 
       - name: Install Python Dependencies
         run: |
-          cd /__w/$(basename ${{ github.repository }})/${{ github.repository }}/build
           pip install --no-cache-dir -r requirements.txt
           pip install --no-cache-dir pyinstaller static-ffmpeg
 
@@ -42,17 +37,13 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Use the actual checkout path
-          DEST="/__w/$(basename ${{ github.repository }})/${{ github.repository }}/build/src/main/resources/alass-bin"
-          mkdir -p "$DEST"
-          cp target/x86_64-unknown-linux-musl/release/alass "$DEST/alass"
-          chmod +x "$DEST/alass"
+          mkdir -p ${{ github.workspace }}/src/main/resources/alass-bin
+          cp target/x86_64-unknown-linux-musl/release/alass ${{ github.workspace }}/src/main/resources/alass-bin/alass
+          chmod +x ${{ github.workspace }}/src/main/resources/alass-bin/alass
 
       - name: Prepare ffmpeg
         run: |
-          # Use the actual checkout path
-          DEST="/__w/$(basename ${{ github.repository }})/${{ github.repository }}/build/src/main/resources/ffmpeg-bin"
-          mkdir -p "$DEST"
+          mkdir -p ${{ github.workspace }}/src/main/resources/ffmpeg-bin
           python3 << 'EOF'
           import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
@@ -64,11 +55,11 @@ jobs:
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
         env:
-          DEST_PATH: "/__w/$(basename ${{ github.repository }})/${{ github.repository }}/build/src/main/resources/ffmpeg-bin"
+          DEST_PATH: ${{ github.workspace }}/src/main/resources/ffmpeg-bin
 
       - name: Run PyInstaller
         run: |
-          cd /__w/$(basename ${{ github.repository }})/${{ github.repository }}/build/src
+          cd ${{ github.workspace }}/src
           chmod +x main/resources/ffmpeg-bin/*
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "main/resources:resources" \
@@ -76,8 +67,7 @@ jobs:
 
       - name: Create AppDir
         run: |
-          WORK_DIR="/__w/$(basename ${{ github.repository }})/${{ github.repository }}/build"
-          DIST_DIR=$(find "$WORK_DIR/src/dist" -maxdepth 1 -type d ! -path "$WORK_DIR/src/dist" | head -1)
+          DIST_DIR=$(find ${{ github.workspace }}/src/dist -maxdepth 1 -type d ! -path ${{ github.workspace }}/src/dist | head -1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
           
