@@ -5,15 +5,12 @@ on:
 
 jobs:
   build:
-    name: Build inside Debian Buster (glibc 2.28)
     runs-on: ubuntu-latest
-
     container:
       image: python:3.10-slim-buster
 
     steps:
-
-      # 1. Fix Debian Buster repositories
+      # 1. Fix Debian Buster repos
       - name: Fix Debian Buster repositories
         run: |
           sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
@@ -51,22 +48,14 @@ jobs:
           git clone --depth 1 https://github.com/denizsafak/AutoSubSync.git /build/src
           cat /build/src/main/VERSION
 
-      # 5. Install all Python dependencies
+      # 5. Install Python dependencies
       - name: Install Python dependencies
         run: |
           cd /build/src
           pip install -e ".[dev]" || pip install -e "."
           pip install \
-            "PyQt6" \
-            "ffsubsync" \
-            "autosubsync" \
-            "static-ffmpeg" \
-            "rich" \
-            "requests" \
-            "psutil" \
-            "platformdirs" \
-            "chardet" \
-            "charset-normalizer"
+            PyQt6 ffsubsync autosubsync static-ffmpeg rich requests \
+            psutil platformdirs chardet charset-normalizer
           pip install "faust-cchardet" 2>/dev/null || true
 
       # 6. Prepare ffmpeg binaries
@@ -84,7 +73,7 @@ os.chmod(os.path.join(dest, "ffprobe"), 0o755)
 PYEOF
 
       # 7. Build alass (musl-static binary)
-      - name: Build alass (musl-static binary)
+      - name: Build alass
         run: |
           mkdir -p /build/src/main/resources/alass-bin
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
@@ -148,7 +137,7 @@ PYEOF
           else
             wget -q "https://raw.githubusercontent.com/denizsafak/AutoSubSync/main/images/AutoSubSync1.png" -O /build/AppDir/autosubsync.png
           fi
-          cat > /build/AppDir/autosubsync.desktop << 'EOF'
+          cat > /build/AppDir/autosubsync.desktop <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
@@ -159,12 +148,11 @@ Icon=autosubsync
 Categories=AudioVideo;Video;
 Terminal=false
 EOF
-          sed -i 's/^[[:space:]]*//' /build/AppDir/autosubsync.desktop
 
       # 12. Create AppRun
       - name: Create AppRun
         run: |
-          cat > /build/AppDir/AppRun << 'APPRUN'
+          cat > /build/AppDir/AppRun <<'APPRUN'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")"
 INTERNAL="$HERE/_internal"
@@ -175,31 +163,3 @@ export LD_LIBRARY_PATH="$INTERNAL:$HERE:${LD_LIBRARY_PATH:-}"
 exec "$INTERNAL/AutoSubSync" "$@"
 APPRUN
           chmod +x /build/AppDir/AppRun
-
-      # 13. Build AppImage
-      - name: Build AppImage
-        run: |
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /build/appimagetool
-          chmod +x /build/appimagetool
-          APPIMAGE_EXTRACT_AND_RUN=1 /build/appimagetool /build/AppDir /build/AutoSubSync-x86_64.AppImage
-          ls -lh /build/AutoSubSync-x86_64.AppImage
-
-      # 14. Optional: Sign AppImage
-      - name: Sign AppImage
-        if: secrets.GPG_PRIVATE_KEY != ''
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          gpg --batch --yes --passphrase "$GPG_PASSPHRASE" \
-              --output /build/AutoSubSync-x86_64.AppImage.sig \
-              --detach-sign /build/AutoSubSync-x86_64.AppImage
-
-      # 15. Upload artifacts
-      - name: Upload AppImage and signature
-        uses: actions/upload-artifact@v3
-        with:
-          name: AutoSubSync-x86_64.AppImage
-          path: |
-            /build/AutoSubSync-x86_64.AppImage
-            /build/AutoSubSync-x86_64.AppImage.sig
