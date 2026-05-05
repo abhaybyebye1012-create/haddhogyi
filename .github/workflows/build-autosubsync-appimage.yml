@@ -53,12 +53,28 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
           git clone --depth 1 https://github.com/kaegi/alass.git /build/alass-src
           cd /build/alass-src
-          # Build from the root of the alass repo
+          
+          # Build the project
           cargo build --release --target x86_64-unknown-linux-musl
           
+          # --- SEARCH AND RESCUE ---
+          # We find any file named 'alass' in the target directory that is an executable
           mkdir -p /build/src/main/resources/alass-bin
-          # The binary is named 'alass', and it's located in the target/target/release folder
-          cp target/x86_64-unknown-linux-musl/release/alass /build/src/main/resources/alass-bin/alass
+          ALASS_PATH=$(find target/ -name alass -type f -executable | head -n 1)
+          
+          if [ -z "$ALASS_PATH" ]; then
+            echo "Binary not found in target/, checking root..."
+            ALASS_PATH=$(find . -name alass -type f -executable | head -n 1)
+          fi
+          
+          if [ -n "$ALASS_PATH" ]; then
+            echo "Found alass at: $ALASS_PATH"
+            cp "$ALASS_PATH" /build/src/main/resources/alass-bin/alass
+          else
+            echo "ERROR: Could not find alass binary anywhere!"
+            exit 1
+          fi
+          
           chmod +x /build/src/main/resources/alass-bin/alass
 
       - name: Prepare ffmpeg
