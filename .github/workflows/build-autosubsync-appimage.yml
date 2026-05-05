@@ -3,7 +3,7 @@ name: Build AutoSubSync AppImage
 on:
   push:
     branches: [ main ]
-  pull_request: 1
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -25,7 +25,6 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
-          # Find the requirements file even if it is in a subdirectory
           REQ_PATH=$(find . -name "requirements.txt" | head -n 1)
           if [ -z "$REQ_PATH" ]; then
             echo "requirements.txt not found. Installing defaults..."
@@ -45,7 +44,6 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Find the resource dir in the checked-out code
           RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/alass-bin"
           cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass"
@@ -55,6 +53,7 @@ jobs:
         run: |
           RES_DIR=$(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
@@ -65,24 +64,20 @@ jobs:
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-        env:
-          DEST_PATH: $(find ${{ github.workspace }} -type d -name "resources" | grep "main/resources" | head -n 1)
+          chmod +x "$RES_DIR/ffmpeg-bin/"*
 
       - name: Run PyInstaller
         run: |
-          # Find main.py and the resources folder
           MAIN_PY=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
           APP_DIR=$(dirname "$MAIN_PY")
           cd "$APP_DIR"
           
-          # Bundle the relative resources path
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           main.py --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Locate the dist folder created by PyInstaller
           DIST_DIR=$(find ${{ github.workspace }} -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
