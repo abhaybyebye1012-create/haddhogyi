@@ -18,7 +18,7 @@ jobs:
           apt-get update
           apt-get install -y git wget curl build-essential libgl1-mesa-dev libxkbcommon-x11-0 \
           libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools
+          libxcb-xinerama0 libxcb-xinput0 libxcb-randr0 libxcb-shape0 binutils musl-tools tree
 
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -32,8 +32,8 @@ jobs:
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
           
-          # Find resources folder relative to wherever checkout happened
-          RES_DIR=$(find $GITHUB_WORKSPACE -type d -name "resources" | head -n 1)
+          # Find resources folder relative to current dir
+          RES_DIR=$(find . -type d -name "resources" | head -n 1)
           mkdir -p "$RES_DIR/alass-bin"
           cp target/x86_64-unknown-linux-musl/release/alass "$RES_DIR/alass-bin/alass" || cp target/x86_64-unknown-linux-musl/release/alass-cli "$RES_DIR/alass-bin/alass"
           chmod +x "$RES_DIR/alass-bin/alass"
@@ -41,9 +41,9 @@ jobs:
       - name: Prepare ffmpeg
         run: |
           pip install --no-cache-dir static-ffmpeg
-          RES_DIR=$(find $GITHUB_WORKSPACE -type d -name "resources" | head -n 1)
+          RES_DIR=$(find . -type d -name "resources" | head -n 1)
           mkdir -p "$RES_DIR/ffmpeg-bin"
-          export DEST_PATH="$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$(pwd)/${RES_DIR#./}/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os
           static_ffmpeg.add_paths()
@@ -54,33 +54,39 @@ jobs:
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
           EOF
-          chmod +x "$RES_DIR/ffmpeg-bin/"*
+          chmod +x "$DEST_PATH/"*
 
       - name: Run PyInstaller
         run: |
-          # 1. Find the exact file path for main.py
-          MAIN_FILE=$(find $GITHUB_WORKSPACE -name "main.py" | head -n 1)
-          # 2. Get the directory and filename
+          # 1. Manually find the main file relative to current dir
+          MAIN_FILE=$(find . -maxdepth 4 -name "main.py" | head -n 1)
+          
+          if [ -z "$MAIN_FILE" ]; then
+            echo "CRITICAL ERROR: main.py not found!"
+            tree -L 4
+            exit 1
+          fi
+
+          echo "Found main.py at: $MAIN_FILE"
           MAIN_DIR=$(dirname "$MAIN_FILE")
           MAIN_NAME=$(basename "$MAIN_FILE")
           
           cd "$MAIN_DIR"
           pip install --no-cache-dir pyinstaller
           
-          # Install requirements from the repo root if they exist
-          REQ=$(find $GITHUB_WORKSPACE -name "requirements.txt" | head -n 1)
+          # Find requirements.txt by looking up from main.py
+          REQ=$(find . -name "requirements.txt" -o -name "../requirements.txt" | head -n 1)
           if [ -n "$REQ" ]; then pip install -r "$REQ"; fi
 
-          # 3. Run PyInstaller from inside the folder where main.py sits
-          # This handles both the script location and the local 'resources' folder
+          # 2. Run PyInstaller
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           "$MAIN_NAME" --name AutoSubSync
 
       - name: Create AppDir
         run: |
-          # Find the dist folder PyInstaller just created
-          DIST_DIR=$(find $GITHUB_WORKSPACE -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
+          # Find the dist folder based on output
+          DIST_DIR=$(find . -type d -name "AutoSubSync" | grep "/dist/" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR/." /tmp/AppDir/
           
