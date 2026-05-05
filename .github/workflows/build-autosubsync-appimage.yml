@@ -62,7 +62,7 @@ jobs:
       - name: Prepare ffmpeg binaries
         run: |
           mkdir -p /build/src/main/resources/ffmpeg-bin
-          python << 'PYEOF'
+python << 'PYEOF'
 import static_ffmpeg, shutil, os
 ffmpeg_path, ffprobe_path = static_ffmpeg.add_paths()
 dest = "/build/src/main/resources/ffmpeg-bin"
@@ -94,7 +94,7 @@ PYEOF
             cp "$AUTOSUBSYNC_SCRIPT" /build/src/main/resources/autosubsync/autosubsync
             chmod +x /build/src/main/resources/autosubsync/autosubsync
           else
-            python << 'PYEOF'
+python << 'PYEOF'
 import os
 path = "/build/src/main/resources/autosubsync/autosubsync"
 script_content = """#!/usr/bin/env python3
