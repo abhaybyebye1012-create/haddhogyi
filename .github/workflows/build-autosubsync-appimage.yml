@@ -75,7 +75,6 @@ jobs:
           cd src/main
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
-          # Added --collect-all for potential hidden dependencies
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           --name AutoSubSync \
@@ -87,32 +86,34 @@ jobs:
           mkdir -p /tmp/AppDir
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
-          # Create Desktop Entry
+          # Create Desktop Entry (Strict Indentation)
           cat <<EOF > /tmp/AppDir/autosubsync.desktop
-[Desktop Entry]
-Type=Application
-Name=AutoSubSync
-Exec=AutoSubSync
-Icon=autosubsync
-Categories=Utility;
-Terminal=false
-EOF
+          [Desktop Entry]
+          Type=Application
+          Name=AutoSubSync
+          Exec=AutoSubSync
+          Icon=autosubsync
+          Categories=Utility;
+          Terminal=false
+          EOF
+          
+          # Clean up accidental leading spaces from the heredoc above
+          sed -i 's/^[[:space:]]*//' /tmp/AppDir/autosubsync.desktop
+          
           touch /tmp/AppDir/autosubsync.png
           
-          # ENHANCED AppRun script
+          # Create AppRun (Strict Indentation)
           cat <<'EOF' > /tmp/AppDir/AppRun
-#!/bin/sh
-# Get the location of the AppRun script
-SELF=$(readlink -f "$0")
-HERE=${SELF%/*}
-
-# Set Library Path to include the AppImage internal libs
-export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
-export PATH="${HERE}:${PATH}"
-
-# Execute the actual binary
-exec "${HERE}/AutoSubSync" "$@"
-EOF
+          #!/bin/sh
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
+          export PATH="${HERE}:${PATH}"
+          exec "${HERE}/AutoSubSync" "$@"
+          EOF
+          
+          # Clean up leading spaces
+          sed -i 's/^[[:space:]]*//' /tmp/AppDir/AppRun
           chmod +x /tmp/AppDir/AppRun
 
       - name: Package AppImage
@@ -122,9 +123,7 @@ EOF
           chmod +x appimagetool
           sed -i 's|AI\x02|\x00\x00\x00|' appimagetool
           ./appimagetool --appimage-extract
-          
           export ARCH=x86_64
-          # Use --no-appimage-extract and ensure the output filename is correct
           ./squashfs-root/usr/bin/appimagetool --no-appimage-extract /tmp/AppDir /tmp/AutoSubSync-x86_64.AppImage
 
       - name: Upload Artifact
