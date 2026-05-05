@@ -38,7 +38,13 @@ jobs:
       # ── 1. Install system libraries required by Qt6 and build tools ─────────
       - name: Install system dependencies
         run: |
-          apt-get update -q
+          # Fix for Debian Buster EOL (repositories moved to archive)
+          echo "deb http://archive.debian.org/debian/ buster main" > /etc/apt/sources.list
+          echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
+          
+          # Update bypassing the expired signature check
+          apt-get -o Acquire::Check-Valid-Until=false update -q
+          
           apt-get install -y --no-install-recommends \
             wget curl git ca-certificates xz-utils file \
             binutils patchelf \
