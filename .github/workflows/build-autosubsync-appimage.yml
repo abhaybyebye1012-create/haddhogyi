@@ -72,9 +72,19 @@ jobs:
       - name: Run PyInstaller
         run: |
           pip install --no-cache-dir pyinstaller
+          # Navigate to the folder containing main.py
           cd src/main
+          
+          # Check if main.py actually exists here
+          if [ ! -f "main.py" ]; then
+            echo "Error: main.py not found in $(pwd)"
+            ls -R $GITHUB_WORKSPACE
+            exit 1
+          fi
+
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           --name AutoSubSync \
@@ -86,34 +96,26 @@ jobs:
           mkdir -p /tmp/AppDir
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
-          # Create Desktop Entry (Strict Indentation)
           cat <<EOF > /tmp/AppDir/autosubsync.desktop
-          [Desktop Entry]
-          Type=Application
-          Name=AutoSubSync
-          Exec=AutoSubSync
-          Icon=autosubsync
-          Categories=Utility;
-          Terminal=false
-          EOF
-          
-          # Clean up accidental leading spaces from the heredoc above
-          sed -i 's/^[[:space:]]*//' /tmp/AppDir/autosubsync.desktop
+[Desktop Entry]
+Type=Application
+Name=AutoSubSync
+Exec=AutoSubSync
+Icon=autosubsync
+Categories=Utility;
+Terminal=false
+EOF
           
           touch /tmp/AppDir/autosubsync.png
           
-          # Create AppRun (Strict Indentation)
           cat <<'EOF' > /tmp/AppDir/AppRun
-          #!/bin/sh
-          SELF=$(readlink -f "$0")
-          HERE=${SELF%/*}
-          export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
-          export PATH="${HERE}:${PATH}"
-          exec "${HERE}/AutoSubSync" "$@"
-          EOF
-          
-          # Clean up leading spaces
-          sed -i 's/^[[:space:]]*//' /tmp/AppDir/AppRun
+#!/bin/sh
+SELF=$(readlink -f "$0")
+HERE=${SELF%/*}
+export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
+export PATH="${HERE}:${PATH}"
+exec "${HERE}/AutoSubSync" "$@"
+EOF
           chmod +x /tmp/AppDir/AppRun
 
       - name: Package AppImage
