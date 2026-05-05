@@ -29,14 +29,11 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
           export PATH="$HOME/.cargo/bin:$PATH"
           rustup target add x86_64-unknown-linux-musl
-          
           git clone --depth 1 https://github.com/kaegi/alass.git /tmp/alass-src
           cd /tmp/alass-src
           cargo build --release --target x86_64-unknown-linux-musl
-          
           cd $GITHUB_WORKSPACE
           mkdir -p src/main/resources/alass-bin
-          
           ALASS_BIN=$(find /tmp/alass-src/target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -name "alass*" | head -n 1)
           if [ -f "$ALASS_BIN" ]; then
             cp "$ALASS_BIN" src/main/resources/alass-bin/alass
@@ -50,7 +47,6 @@ jobs:
           pip install --no-cache-dir static-ffmpeg
           mkdir -p src/main/resources/ffmpeg-bin
           export DEST_PATH="$GITHUB_WORKSPACE/src/main/resources/ffmpeg-bin"
-          
           python3 -c "
           import os, shutil
           try:
@@ -65,7 +61,6 @@ jobs:
           except Exception as e:
               print(f'Pip lookup failed: {e}')
           " || echo "Pip-based ffmpeg prep failed..."
-
           if [ ! -f "src/main/resources/ffmpeg-bin/ffmpeg" ]; then
             wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
             tar -xJf ffmpeg-release-amd64-static.tar.xz
@@ -80,7 +75,7 @@ jobs:
           cd src/main
           if [ -f "../../requirements.txt" ]; then pip install -r ../../requirements.txt; fi
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
-
+          # Added --collect-all for potential hidden dependencies
           pyinstaller --noconfirm --onedir --windowed \
           --add-data "resources:resources" \
           --name AutoSubSync \
@@ -92,6 +87,7 @@ jobs:
           mkdir -p /tmp/AppDir
           cp -a src/main/dist/AutoSubSync/. /tmp/AppDir/
           
+          # Create Desktop Entry
           cat <<EOF > /tmp/AppDir/autosubsync.desktop
 [Desktop Entry]
 Type=Application
@@ -99,13 +95,22 @@ Name=AutoSubSync
 Exec=AutoSubSync
 Icon=autosubsync
 Categories=Utility;
+Terminal=false
 EOF
           touch /tmp/AppDir/autosubsync.png
           
+          # ENHANCED AppRun script
           cat <<'EOF' > /tmp/AppDir/AppRun
 #!/bin/sh
-HERE="$(dirname "$(readlink -f "${0}")")"
+# Get the location of the AppRun script
+SELF=$(readlink -f "$0")
+HERE=${SELF%/*}
+
+# Set Library Path to include the AppImage internal libs
+export LD_LIBRARY_PATH="${HERE}:${LD_LIBRARY_PATH}"
 export PATH="${HERE}:${PATH}"
+
+# Execute the actual binary
 exec "${HERE}/AutoSubSync" "$@"
 EOF
           chmod +x /tmp/AppDir/AppRun
@@ -113,20 +118,13 @@ EOF
       - name: Package AppImage
         run: |
           cd /tmp
-          # 1. Download appimagetool
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          
-          # 2. PATCH THE BINARY (Workaround for Docker/No-FUSE)
-          # This replaces the FUSE magic bytes so the AppImage can extract without mounting
           sed -i 's|AI\x02|\x00\x00\x00|' appimagetool
-          
-          # 3. Extract
           ./appimagetool --appimage-extract
           
-          # 4. Build the final AppImage
           export ARCH=x86_64
-          # We call the extracted binary directly to bypass FUSE entirely
+          # Use --no-appimage-extract and ensure the output filename is correct
           ./squashfs-root/usr/bin/appimagetool --no-appimage-extract /tmp/AppDir /tmp/AutoSubSync-x86_64.AppImage
 
       - name: Upload Artifact
