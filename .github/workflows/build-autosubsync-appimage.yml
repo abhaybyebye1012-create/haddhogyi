@@ -41,47 +41,53 @@ jobs:
           cargo build --release --target x86_64-unknown-linux-musl
           
           ALASS_BIN=$(find target/x86_64-unknown-linux-musl/release/ -maxdepth 1 -type f -executable | head -n 1)
-          # Hard-coded relative path target
-          mkdir -p "${{ github.workspace }}/src/main/resources/alass-bin"
-          cp "$ALASS_BIN" "${{ github.workspace }}/src/main/resources/alass-bin/alass"
-          chmod +x "${{ github.workspace }}/src/main/resources/alass-bin/alass"
+          # Locate the main/resources directory dynamically
+          RES_DIR=$(find ${{ github.workspace }} -type d -path "*/main/resources" | head -n 1)
+          mkdir -p "$RES_DIR/alass-bin"
+          cp "$ALASS_BIN" "$RES_DIR/alass-bin/alass"
+          chmod +x "$RES_DIR/alass-bin/alass"
 
       - name: Prepare ffmpeg
         run: |
-          # Create the directory explicitly using the workspace variable
-          DEST="${{ github.workspace }}/src/main/resources/ffmpeg-bin"
-          mkdir -p "$DEST"
-          export DEST_PATH="$DEST"
+          RES_DIR=$(find ${{ github.workspace }} -type d -path "*/main/resources" | head -n 1)
+          mkdir -p "$RES_DIR/ffmpeg-bin"
+          export DEST_PATH="$RES_DIR/ffmpeg-bin"
           python3 << 'EOF'
           import static_ffmpeg, shutil, os, sys
           static_ffmpeg.add_paths()
-          # This triggers the download if not present
           bin_dir = "/usr/local/lib/python3.10/site-packages/static_ffmpeg/bin/linux"
           dest = os.getenv("DEST_PATH")
-          print(f"Copying FFmpeg from {bin_dir} to {dest}")
           for f in ["ffmpeg", "ffprobe"]:
               src = os.path.join(bin_dir, f)
               if os.path.exists(src):
                   shutil.copy2(src, os.path.join(dest, f))
-                  print(f"Successfully copied {f}")
-              else:
-                  print(f"Warning: {f} not found in {bin_dir}")
           EOF
-          chmod +x "$DEST/"*
+          chmod +x "$RES_DIR/ffmpeg-bin/"*
 
       - name: Run PyInstaller
         run: |
-          # Move to the src directory where main.py and resources live
-          cd "${{ github.workspace }}/src"
+          # 1. Find the absolute path to main.py
+          FULL_MAIN_PATH=$(find ${{ github.workspace }} -name "main.py" | head -n 1)
+          # 2. Get the directory containing main.py
+          BASE_DIR=$(dirname "$FULL_MAIN_PATH")
           
-          pyinstaller --noconfirm --onedir --windowed \
-          --add-data "main/resources:resources" \
-          main/main.py --name AutoSubSync
+          cd "$BASE_DIR"
+          
+          # 3. Check if resources folder exists relative to main.py
+          if [ -d "resources" ]; then
+            pyinstaller --noconfirm --onedir --windowed \
+            --add-data "resources:resources" \
+            "$FULL_MAIN_PATH" --name AutoSubSync
+          else
+            # Fallback for different project structures
+            pyinstaller --noconfirm --onedir --windowed \
+            "$FULL_MAIN_PATH" --name AutoSubSync
+          fi
 
       - name: Create AppDir
         run: |
-          # Locate the dist folder
-          DIST_DIR="${{ github.workspace }}/src/dist/AutoSubSync"
+          # Find the dist/AutoSubSync folder wherever PyInstaller put it
+          DIST_DIR=$(find ${{ github.workspace }} -type d -path "*/dist/AutoSubSync" | head -n 1)
           mkdir -p /tmp/AppDir
           cp -a "$DIST_DIR"/. /tmp/AppDir/
           
